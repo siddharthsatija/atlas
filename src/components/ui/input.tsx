@@ -2,40 +2,81 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { Spinner } from "./spinner";
 
 /**
- * Input — design system §11.
+ * Input — design system §11, states per frontend §18.
  *
- * The visible <label> and any help or error text are supplied by the form field
- * wrapper that owns association (`aria-describedby`, `aria-invalid`). A placeholder
- * is never a label.
+ * The resting border uses **`border-strong`**, not `border-default`: an input's
+ * border is the visual affordance that identifies the control, so it must meet the
+ * 3:1 non-text contrast requirement (SC 1.4.11). `border-default` is decorative
+ * separation only and does not (design system §2.4, established by ATL-008).
  *
- * Sensitive values are masked by default and revealed deliberately; that behavior
- * belongs to the SensitiveValue primitive (ATL-035), not here.
+ * The visible `<label>`, help text, and error text are supplied by the form field
+ * wrapper that owns their association (`aria-describedby`, `aria-invalid`). A
+ * placeholder is never a label.
+ *
+ * Masking of sensitive values is NOT this component's job — that is
+ * `SensitiveValue`, which handles deliberate temporary reveal and the audit seam.
  */
-export interface InputProps extends React.ComponentProps<"input"> {
-  /** Renders the error state. Association is the form field's responsibility. */
-  invalid?: boolean;
+
+export type InputState = "default" | "error" | "success";
+
+export interface InputProps extends Omit<React.ComponentProps<"input">, "size"> {
+  /** Validation state. `error` also sets `aria-invalid`. */
+  state?: InputState;
+  /**
+   * Async work in progress (e.g. availability check). Renders a spinner and marks
+   * the field busy without removing it from the tab order.
+   */
+  loading?: boolean;
 }
 
-function Input({ className, type = "text", invalid, ...props }: InputProps) {
-  return (
+function Input({
+  className,
+  type = "text",
+  state = "default",
+  loading = false,
+  ...props
+}: InputProps) {
+  const field = (
     <input
       type={type}
       data-slot="input"
-      aria-invalid={invalid || undefined}
+      data-state={state}
+      aria-invalid={state === "error" ? true : undefined}
+      aria-busy={loading || undefined}
       className={cn(
         "bg-surface text-text-primary placeholder:text-text-muted",
-        "h-10 w-full rounded-input border border-border-default px-3",
+        // border-strong: the control's identifying boundary (SC 1.4.11).
+        "h-10 w-full rounded-input border border-border-strong px-3",
         "text-body-sm transition-colors duration-[--duration-standard]",
-        "hover:border-border-strong",
+        // hover / focus
+        "hover:border-accent",
+        // disabled + read-only
         "disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:opacity-60",
-        // Error state carries a border change plus the aria attribute — never color alone.
-        "aria-[invalid=true]:border-danger aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-danger/20",
+        "read-only:cursor-default read-only:bg-surface-subtle",
+        // error / success — never colour alone: the form field renders the message,
+        // and aria-invalid carries the state programmatically.
+        "data-[state=error]:border-danger data-[state=error]:ring-2 data-[state=error]:ring-danger/20",
+        "data-[state=success]:border-success",
+        loading && "pr-9",
         className,
       )}
       {...props}
     />
+  );
+
+  if (!loading) return field;
+
+  return (
+    <span data-slot="input-wrapper" className="relative block">
+      {field}
+      <Spinner className="absolute top-1/2 right-3 size-4 -translate-y-1/2 text-text-muted" />
+      <span className="sr-only" role="status" aria-live="polite">
+        Checking…
+      </span>
+    </span>
   );
 }
 

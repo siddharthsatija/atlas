@@ -56,7 +56,9 @@ describe("repository guards", () => {
 
     const offenders = sourceFiles("src/components", ["ts", "tsx"])
       .concat(sourceFiles("src/app", ["ts", "tsx"]))
-      .filter((f) => !f.endsWith("repo-guards.test.ts"))
+      // Tests assert the ABSENCE of raw colours, so they necessarily name them.
+      // The guard protects shipped component source.
+      .filter((f) => !/\.test\.tsx?$/.test(f))
       .filter((f) => {
         const content = read(f);
         return RAW_COLOUR.test(content) || TAILWIND_PALETTE.test(content);

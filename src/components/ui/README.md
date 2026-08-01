@@ -4,11 +4,24 @@ Domain-free building blocks. A primitive takes a `severity`, never a `finding`.
 
 ## What is here
 
-Button, Input, Label, Card, Dialog, Tabs, Badge, Tooltip, Toast, Skeleton, Table,
-Avatar, Spinner — plus layout primitives in `../layout/`.
+Button, Input, Label, Card, Dialog, **Drawer**, Tabs, Badge, **StatusBadge**,
+**SeverityBadge**, Tooltip, Toast, **DropdownMenu**, Skeleton, **EmptyState**,
+Table, Avatar, Spinner, **SensitiveValue** — plus layout primitives in `../layout/`.
 
 `Dialog` is the "Modal" referred to in the frontend specification; there is no
-separate Modal component.
+separate Modal component. `Drawer` is the edge-anchored panel used for contextual
+inspection and, from ATL-007, for mobile navigation.
+
+### SensitiveValue
+
+The security-critical primitive (security §8). It never receives the unmasked value
+up front: the caller passes a masked string plus an `onReveal` resolver, so the
+value is absent from the DOM until the user acts. Reveal is temporary and
+auto-re-masks. Every transition emits a `SensitiveValueAuditEvent` that carries the
+field label and entity reference but **never the value** (ADR-006).
+
+`onAuditEvent` is a seam only. Applying the component across surfaces is ATL-035;
+persisting the events is ATL-103.
 
 ## Not here yet
 

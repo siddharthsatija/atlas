@@ -75,6 +75,10 @@ export default tseslint.config(
       "test-results/**",
       "node_modules/**",
       "src/types/database.generated.ts",
+      // Supabase CLI scratch output. Gitignored, not project source, and outside
+      // the tsconfig project so type-aware linting cannot parse it.
+      "supabase/.temp/**",
+      "supabase/.branches/**",
     ],
   },
 
