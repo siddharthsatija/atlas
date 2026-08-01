@@ -1,0 +1,22 @@
+.next/
+coverage/
+playwright-report/
+test-results/
+node_modules/
+pnpm-lock.yaml
+src/types/database.generated.ts
+supabase/.temp/
+
+# Contains {{placeholder}} tokens and is therefore not parseable SQL. It is a
+# template to copy into a migration, not executable SQL. Real migrations and seeds
+# ARE formatted by prettier-plugin-sql.
+database/policies/rls-policy.template.sql
+
+# Authored documentation is the source of truth and is not code-formatted.
+# Reformatting it produced churn and mangled the SQL sample in security §7
+# (prettier-plugin-sql rewrites fenced SQL inside markdown).
+docs/
+.claude/
+CLAUDE.md
+CHANGELOG.md
+README.md

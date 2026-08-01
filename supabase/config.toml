@@ -1,0 +1,72 @@
+# Local Supabase configuration.
+#
+# Local only. Staging and production are separate projects with separate keys,
+# databases, and storage (architecture §18). Production data is never copied here.
+
+project_id = "atlas-local"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+# Captures outbound mail locally so magic links never leave the machine.
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = true
+# Magic link / passwordless is the primary method (security §5).
+enable_confirmations = true
+double_confirm_changes = true
+secure_password_change = true
+otp_expiry = 3600
+
+[auth.mfa]
+# Optional TOTP MFA — ATL-110 (P1). Enabled here so the local environment can
+# exercise enrollment once that ticket lands.
+max_enrolled_factors = 10
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[auth.rate_limit]
+# Defense in depth: application-level limits are enforced separately via the shared
+# durable store (ATL-086), since serverless cannot rate-limit in memory.
+email_sent = 10
+sign_in_sign_ups = 30
+token_verifications = 30
+
+[storage]
+enabled = true
+file_size_limit = "10MiB"
+
+[analytics]
+enabled = false

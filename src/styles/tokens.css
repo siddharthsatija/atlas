@@ -1,0 +1,123 @@
+/**
+ * Atlas design tokens.
+ *
+ * Source of truth: docs/06-design-system.md. Values in the color tables below are
+ * taken verbatim from §2.1 (baseline palette). Do not introduce a new semantic role
+ * or change a value here without updating that document first.
+ *
+ * Tailwind v4 is CSS-first: @theme registers these as design tokens so utilities
+ * (bg-surface, text-secondary, rounded-card) are generated from them. There is no
+ * tailwind.config.js.
+ *
+ * Rules enforced by review (.claude/skills/design-system/checklists.md):
+ *   - Components reference semantic roles, never raw hex or framework palette names.
+ *   - Dark mode is handled here, at the variable layer — never per component.
+ *   - Every text/background pairing must pass WCAG 2.2 AA. Verify programmatically.
+ *   - Radius and elevation differ by tier; not every container looks the same.
+ */
+
+@theme {
+  /* --- Color: semantic roles only (design system §2) ---------------------- */
+  --color-background: #f8f9fb;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-subtle: #f1f3f6;
+
+  --color-text-primary: #16181d;
+  --color-text-secondary: #4a5160;
+  --color-text-muted: #6e7688;
+
+  --color-border-default: #e3e6ec;
+  --color-border-strong: #c9ceda;
+
+  --color-accent: #4f5bd5;
+  --color-accent-subtle: #eef0fc;
+
+  --color-success: #1f7a4d;
+  --color-warning: #b0680f;
+  --color-danger: #b3352e;
+  --color-info: #2563a8;
+
+  /* --- Typography (design system §3) -------------------------------------- */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-display: 2.5rem; /* 40 / 48 semibold */
+  --text-display--line-height: 3rem;
+  --text-h1: 2rem; /* 32 / 40 semibold */
+  --text-h1--line-height: 2.5rem;
+  --text-h2: 1.5rem; /* 24 / 32 semibold */
+  --text-h2--line-height: 2rem;
+  --text-h3: 1.25rem; /* 20 / 28 semibold */
+  --text-h3--line-height: 1.75rem;
+  --text-body-lg: 1.125rem; /* 18 / 28 */
+  --text-body-lg--line-height: 1.75rem;
+  --text-body: 1rem; /* 16 / 24 */
+  --text-body--line-height: 1.5rem;
+  --text-body-sm: 0.875rem; /* 14 / 20 */
+  --text-body-sm--line-height: 1.25rem;
+  --text-label: 0.8125rem; /* 13 / 18 medium */
+  --text-label--line-height: 1.125rem;
+  --text-caption: 0.75rem; /* 12 / 16 */
+  --text-caption--line-height: 1rem;
+
+  /* --- Spacing: 4px base (design system §4) ------------------------------- */
+  --spacing: 0.25rem;
+
+  /* --- Radius by tier — deliberately not uniform (design system §5) ------- */
+  --radius-control: 0.5rem; /* 8  — small controls */
+  --radius-input: 0.625rem; /* 10 — inputs and buttons */
+  --radius-card: 0.875rem; /* 14 — standard cards */
+  --radius-panel: 1.125rem; /* 18 — prominent panels */
+  --radius-modal: 1.25rem; /* 20 — modals */
+
+  /* --- Elevation: borders and tone before shadows (design system §6) ------ */
+  --shadow-level-1: 0 1px 2px 0 rgb(16 24 40 / 0.04);
+  --shadow-level-2: 0 4px 12px -2px rgb(16 24 40 / 0.08);
+  --shadow-level-3: 0 16px 48px -8px rgb(16 24 40 / 0.16);
+
+  /* --- Motion (design system §14) ----------------------------------------- */
+  --duration-standard: 180ms; /* 150–220 band */
+  --duration-panel: 260ms; /* 220–300 band */
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out */
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1); /* ease-in */
+
+  /* --- Layout (frontend spec §2, §21) ------------------------------------- */
+  --container-content: 90rem; /* ~1440px max content width */
+  --breakpoint-sm: 40rem; /* 640  */
+  --breakpoint-md: 64rem; /* 1024 */
+  --breakpoint-lg: 90rem; /* 1440 */
+}
+
+/**
+ * Dark mode. Values from design system §2.1, dark column.
+ * Toggled by next-themes via the `class` strategy on <html>.
+ */
+@layer theme {
+  .dark {
+    --color-background: #101216;
+    --color-surface: #171a20;
+    --color-surface-raised: #1e222a;
+    --color-surface-subtle: #14171c;
+
+    --color-text-primary: #f2f4f8;
+    --color-text-secondary: #b4bac7;
+    --color-text-muted: #838b9b;
+
+    --color-border-default: #262b34;
+    --color-border-strong: #3a4150;
+
+    --color-accent: #7b86e8;
+    --color-accent-subtle: #232848;
+
+    --color-success: #3da972;
+    --color-warning: #d08c2e;
+    --color-danger: #e06a5f;
+    --color-info: #5b9bd8;
+
+    /* Shadows read heavier on dark surfaces; keep them restrained. */
+    --shadow-level-1: 0 1px 2px 0 rgb(0 0 0 / 0.24);
+    --shadow-level-2: 0 4px 12px -2px rgb(0 0 0 / 0.32);
+    --shadow-level-3: 0 16px 48px -8px rgb(0 0 0 / 0.48);
+  }
+}

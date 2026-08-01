@@ -1,0 +1,3 @@
+# Gates that are cheap locally and expensive to discover in CI.
+pnpm typecheck
+pnpm test

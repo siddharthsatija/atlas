@@ -1,0 +1,91 @@
+name: CI
+
+# Aggregate gate. Required checks from docs/02-technical-architecture.md §19.
+# A red gate is fixed, never bypassed (.claude/skills/deployment/SKILL.md).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Required gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests with coverage
+        run: pnpm test:coverage
+
+      - name: Verify PR template is in sync
+        run: pnpm verify:pr-template
+
+      - name: Build
+        run: pnpm build
+        env:
+          # Build-time placeholders only. Real values live in environment secrets
+          # per security §9; none of these are valid credentials.
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
+          ATLAS_KEK_VERSION: "1"
+          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
+          ANTHROPIC_API_KEY: ci-placeholder
+          RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
+          RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          ATLAS_ENV: preview
+
+      - name: Assert no server secrets in the client bundle
+        # Guards the §5 trust boundary: no service-role or provider key may ship
+        # to the browser. Placeholder values are searched for by name and value.
+        run: |
+          set -euo pipefail
+          if grep -rIl --include='*.js' \
+            -e 'ci-placeholder-service-role-key' \
+            -e 'SUPABASE_SERVICE_ROLE_KEY' \
+            -e 'ATLAS_KEK' \
+            -e 'AUDIT_HMAC_KEY' \
+            -e 'ANTHROPIC_API_KEY' \
+            .next/static 2>/dev/null; then
+            echo "::error::Server-only secret reference found in the client bundle."
+            exit 1
+          fi
+          echo "client bundle clean"
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7

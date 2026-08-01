@@ -1,0 +1,29 @@
+{
+  "semi": true,
+  "singleQuote": false,
+  "trailingComma": "all",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "arrowParens": "always",
+  "endOfLine": "lf",
+  "plugins": ["prettier-plugin-sql", "prettier-plugin-tailwindcss"],
+  "tailwindStylesheet": "./src/styles/globals.css",
+  "overrides": [
+    {
+      "files": ["*.md"],
+      "options": { "proseWrap": "preserve" }
+    },
+    {
+      "files": ["*.sql"],
+      "options": {
+        "language": "postgresql",
+        "keywordCase": "lower",
+        "dataTypeCase": "lower",
+        "functionCase": "lower",
+        "identifierCase": "preserve",
+        "expressionWidth": 100
+      }
+    }
+  ]
+}

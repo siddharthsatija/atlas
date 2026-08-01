@@ -1,0 +1,16 @@
+{
+  "product": "Atlas",
+  "version": "1.0",
+  "generated_files": [
+    "CLAUDE.md",
+    "README.md",
+    "docs/01-product-requirements.md",
+    "docs/02-technical-architecture.md",
+    "docs/03-security-and-access.md",
+    "docs/04-frontend-specification.md",
+    "docs/05-feature-ticket-list.md",
+    "docs/06-design-system.md",
+    "docs/07-ai-behavior.md"
+  ],
+  "ticket_count": 100
+}

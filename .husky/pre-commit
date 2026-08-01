@@ -1,0 +1,8 @@
+pnpm lint-staged
+
+# Cheap secret tripwire. The authoritative scan runs in CI (ATL-090); this only
+# catches the most common local mistake before it reaches history.
+if git diff --cached --name-only | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example'; then
+  echo "refusing commit: .env file staged. Secrets never enter git (security §9)."
+  exit 1
+fi

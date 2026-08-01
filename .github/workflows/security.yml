@@ -1,0 +1,81 @@
+name: Security
+
+# Secret and dependency scanning (ATL-090). Critical findings block merge.
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Scan history for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit (fail on high or critical)
+        run: pnpm audit --audit-level=high
+
+  forbidden-patterns:
+    name: Forbidden patterns
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check for prohibited code patterns
+        run: |
+          set -euo pipefail
+          fail=0
+
+          # Browser storage is prohibited for privacy-relevant values (frontend spec).
+          if grep -rIn --include='*.ts' --include='*.tsx' \
+              -e 'localStorage' -e 'sessionStorage' src/ 2>/dev/null; then
+            echo "::error::Browser storage is prohibited. Persist server-side."
+            fail=1
+          fi
+
+          # Logging must route through the redaction utility (ATL-085).
+          if grep -rIn --include='*.ts' --include='*.tsx' \
+              -e 'console\.\(log\|info\|warn\|error\)' src/ 2>/dev/null \
+              | grep -v 'src/lib/telemetry/'; then
+            echo "::error::Use the redaction-aware logger, not console (ATL-085)."
+            fail=1
+          fi
+
+          # A service-role client must never be constructed outside server-only modules.
+          if grep -rIn --include='*.tsx' -e 'SERVICE_ROLE' src/ 2>/dev/null; then
+            echo "::error::Service-role key referenced from a component file."
+            fail=1
+          fi
+
+          exit $fail

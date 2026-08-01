@@ -1,0 +1,46 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
+          ATLAS_KEK_VERSION: "1"
+          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
+          ANTHROPIC_API_KEY: ci-placeholder
+          RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
+          RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          ATLAS_ENV: preview
+      - name: Report bundle size
+        run: |
+          echo "### Bundle output" >> "$GITHUB_STEP_SUMMARY"
+          du -sh .next/static >> "$GITHUB_STEP_SUMMARY"

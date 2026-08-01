@@ -1,0 +1,4 @@
+# Indexing stays closed until launch copy and claims are reviewed (PRD §14).
+# Opened deliberately as part of the launch readiness review (ATL-100).
+User-agent: *
+Disallow: /

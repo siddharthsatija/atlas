@@ -1,0 +1,13 @@
+-- Local seed.
+--
+-- Deliberately empty of data.
+--
+-- Rules (architecture §8, .claude/skills/database/SKILL.md):
+--   * No production data. Ever.
+--   * No product/demo records here. Demo data is created PER USER at runtime,
+--     labeled `source_type = 'demo'`, and must be removable — ATL-018 / ATL-083.
+--     Seeding demo rows globally would break demo isolation (ADR-004) and the
+--     demo-removal guarantee.
+--   * Anything added here must be non-personal reference data only.
+--
+-- Reset the local database with: pnpm db:reset

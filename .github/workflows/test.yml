@@ -1,0 +1,114 @@
+name: Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Unit tests with coverage thresholds
+        run: pnpm test:coverage
+
+  integration:
+    name: Integration tests (RLS, services, jobs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # INACTIVE until the first migration exists.
+    #
+    # WHY: integration tests verify RLS policies, service authorization, and job
+    # behavior against a real database. There is no schema yet, so this job would
+    # execute zero assertions and report green — a false pass on the single most
+    # security-critical test suite in the project (threat T1, ATL-088).
+    #
+    # ACTIVATING TICKET: ATL-027 (digital asset schema), milestone M3/M5.
+    # When the first migration lands, delete the `if:` guard below.
+    #
+    # It is still runnable on demand via workflow_dispatch, and the guard step
+    # makes it FAIL LOUDLY rather than silently pass if invoked prematurely.
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Refuse to report a false pass
+        run: |
+          set -euo pipefail
+          migrations=$(find supabase/migrations -name '*.sql' 2>/dev/null | wc -l)
+          if [ "$migrations" -eq 0 ]; then
+            echo "::error title=Integration tests not yet active::No migrations found in supabase/migrations."
+            echo "This job is inactive until ATL-027 lands (see .claude/implementation-order.md)."
+            echo "Running it now would execute zero assertions and falsely report success."
+            exit 1
+          fi
+          echo "Found $migrations migration(s); proceeding."
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Start local Supabase
+        run: pnpm db:start
+
+      - name: Integration tests
+        run: pnpm test:integration
+
+      - name: Stop Supabase
+        if: always()
+        run: pnpm db:stop
+
+  e2e:
+    name: End-to-end and accessibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run Playwright
+        run: pnpm test:e2e
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
+          ATLAS_KEK_VERSION: "1"
+          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
+          ANTHROPIC_API_KEY: ci-placeholder
+          RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
+          RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          ATLAS_ENV: preview
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
