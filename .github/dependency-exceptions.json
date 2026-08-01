@@ -1,0 +1,14 @@
+{
+  "$comment": [
+    "Time-boxed acceptances of dependency advisories (ATL-090).",
+    "Every entry needs a reason, an owner, an expiry, and a tracking reference.",
+    "An expired or stale entry FAILS the build, forcing the risk to be re-decided.",
+    "Process, criteria, and a worked example: .github/SECURITY.md",
+    "",
+    "Currently empty: `pnpm audit` reports no advisories. The previous acceptance of",
+    "GHSA-mh99-v99m-4gvg (brace-expansion, reached via eslint > minimatch@3) was",
+    "removed when the gate detected it no longer matched any advisory. Under pnpm's",
+    "auditConfig.ignoreGhsas that acceptance would have stayed invisible indefinitely."
+  ],
+  "exceptions": []
+}

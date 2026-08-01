@@ -216,6 +216,7 @@ describe("environment isolation", () => {
     });
 
     it("never includes a secret value in the error message", () => {
+      // atlas-scan-ignore — synthetic fixture asserting secrets never reach messages
       const secret = "SUPER-SECRET-SERVICE-ROLE-VALUE";
       const e = hostedEnv({
         SUPABASE_SERVICE_ROLE_KEY: secret,

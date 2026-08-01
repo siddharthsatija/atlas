@@ -26,7 +26,22 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Scan history for secrets
+      # First-party scan: Atlas-specific credentials (ATLAS_KEK, AUDIT_HMAC_KEY,
+      # Supabase service-role JWTs) and committed .env files. Runs on the working
+      # tree and is verifiable locally via `pnpm gates:verify --only secrets`.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Atlas secret scan (working tree)
+        run: pnpm scan:secrets
+
+      # Defense in depth: gitleaks additionally scans full git HISTORY, catching a
+      # credential that was committed and later removed.
+      - name: Gitleaks (full history)
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,8 +58,21 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Audit (fail on high or critical)
-        run: pnpm audit --audit-level=high
+
+      # High and critical advisories block the merge unless covered by a
+      # documented, time-boxed exception (.github/dependency-exceptions.json).
+      # Expired or stale exceptions also fail — accepted risk cannot become
+      # permanent by neglect. Runbook: .github/SECURITY.md
+      - name: Dependency audit policy
+        run: pnpm deps:verify --report audit-report.json
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit-report
+          path: audit-report.json
+          retention-days: 7
 
   forbidden-patterns:
     name: Forbidden patterns

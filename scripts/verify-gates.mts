@@ -37,6 +37,8 @@ interface Gate {
   /** The defect this fixture introduces. */
   defect: string;
   fixture: Fixture;
+  /** Extra environment for the gate command, when the fixture needs wiring in. */
+  env?: Record<string, string>;
 }
 
 /**
@@ -113,6 +115,30 @@ const GATES: Gate[] = [
     },
   },
   {
+    id: "secrets",
+    gate: "Secret scan",
+    command: "pnpm scan:secrets",
+    defect: "a synthetic AWS access key committed to source",
+    fixture: {
+      path: "src/utils/_gate-fixture-secret.ts",
+      // Assembled at runtime so this file does not itself contain a key-shaped
+      // literal — the scanner would (correctly) flag its own fixture definition.
+      content: `export const credential = "${"AKIA"}${"IOSFODNN7EXAMPLQ"}";\n`,
+    },
+  },
+  {
+    id: "dependencies",
+    gate: "Dependency audit policy",
+    command: "pnpm deps:verify",
+    defect: "a malformed exception entry (missing reason, owner, expiry)",
+    fixture: {
+      path: ".github/_gate-fixture-exceptions.json",
+      // An exception with no reason, owner, expiry, or tracking reference.
+      content: JSON.stringify({ exceptions: [{ id: "GHSA-fixture" }] }, null, 2) + "\n",
+    },
+    env: { ATLAS_DEPENDENCY_EXCEPTIONS: ".github/_gate-fixture-exceptions.json" },
+  },
+  {
     id: "build",
     gate: "Production build",
     command: "pnpm build",
@@ -140,9 +166,9 @@ function parseList(argv: string[], flag: string): string[] | null {
 }
 
 /** Runs a command, returning its exit code. Output is captured, not printed. */
-function runQuietly(command: string): number {
+function runQuietly(command: string, env?: Record<string, string>): number {
   try {
-    execSync(command, { stdio: "pipe", encoding: "utf8" });
+    execSync(command, { stdio: "pipe", encoding: "utf8", env: { ...process.env, ...env } });
     return 0;
   } catch (error) {
     const code = (error as { status?: number }).status;
@@ -192,9 +218,13 @@ function main(): void {
     let exitCode: number;
     try {
       writeFixture(gate.fixture);
-      exitCode = runQuietly(gate.command);
+      exitCode = runQuietly(gate.command, gate.env);
     } finally {
       removeFixture(gate.fixture);
+    }
+
+    if (existsSync(gate.fixture.path)) {
+      failures.push(`${gate.id}: fixture ${gate.fixture.path} was not cleaned up`);
     }
 
     if (exitCode === 0) {

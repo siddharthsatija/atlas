@@ -59,15 +59,17 @@ export function findForbiddenSecretReferences(file: string, content: string): Ci
  * gate runs, so renaming a script without updating CI is caught.
  */
 export const REQUIRED_GATES = [
-  { gate: "Formatting", command: "format:check" },
-  { gate: "Lint", command: "lint" },
-  { gate: "Type check", command: "typecheck" },
-  { gate: "Unit tests", command: "test" },
-  { gate: "Integration tests", command: "test:integration" },
-  { gate: "Production build", command: "build" },
-  { gate: "Migration validation", command: "db:validate-migrations" },
-  { gate: "Dependency and secret scanning", command: "audit" },
-  { gate: "Accessibility smoke tests", command: "test:a11y" },
+  { gate: "Formatting", commands: ["format:check"] },
+  { gate: "Lint", commands: ["lint"] },
+  { gate: "Type check", commands: ["typecheck"] },
+  { gate: "Unit tests", commands: ["test"] },
+  { gate: "Integration tests", commands: ["test:integration"] },
+  { gate: "Production build", commands: ["build"] },
+  { gate: "Migration validation", commands: ["db:validate-migrations"] },
+  // §19 lists this as one gate; Atlas implements it as two scans (ATL-090), and
+  // both must run for the gate to be satisfied.
+  { gate: "Dependency and secret scanning", commands: ["scan:secrets", "deps:verify"] },
+  { gate: "Accessibility smoke tests", commands: ["test:a11y"] },
 ] as const;
 
 export interface WorkflowFile {
@@ -90,24 +92,26 @@ export function findMissingGates(workflows: WorkflowFile[]): CiPolicyViolation[]
   const prWorkflows = workflows.filter((w) => runsOnPullRequest(w.content));
   const violations: CiPolicyViolation[] = [];
 
-  for (const { gate, command } of REQUIRED_GATES) {
-    const onPr = prWorkflows.some((w) => w.content.includes(command));
-    if (onPr) continue;
+  for (const { gate, commands } of REQUIRED_GATES) {
+    for (const command of commands) {
+      const onPr = prWorkflows.some((w) => w.content.includes(command));
+      if (onPr) continue;
 
-    const anywhere = workflows.find((w) => w.content.includes(command));
-    violations.push(
-      anywhere
-        ? {
-            rule: "gate-not-on-pull-request",
-            file: anywhere.file,
-            message: `Gate "${gate}" (${command}) exists but does not run on pull requests, so it cannot block a merge (architecture §19).`,
-          }
-        : {
-            rule: "missing-required-gate",
-            file: ".github/workflows",
-            message: `Gate "${gate}" (${command}) is required by architecture §19 but no workflow runs it.`,
-          },
-    );
+      const anywhere = workflows.find((w) => w.content.includes(command));
+      violations.push(
+        anywhere
+          ? {
+              rule: "gate-not-on-pull-request",
+              file: anywhere.file,
+              message: `Gate "${gate}" (${command}) exists but does not run on pull requests, so it cannot block a merge (architecture §19).`,
+            }
+          : {
+              rule: "missing-required-gate",
+              file: ".github/workflows",
+              message: `Gate "${gate}" (${command}) is required by architecture §19 but no workflow runs it.`,
+            },
+      );
+    }
   }
   return violations;
 }

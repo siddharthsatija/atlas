@@ -50,6 +50,9 @@ pnpm-debug.log*
 /scratch/
 *.export.json
 
-# Temporary fixtures written by `pnpm gates:verify` (always cleaned up).
-_gate-fixture*
-**/_gate-fixture*
+# NOTE: gate fixtures are deliberately NOT ignored here.
+# Prettier honours .gitignore and the secret scanner only inspects files that could
+# enter the repository, so ignoring fixtures silently disables those gates during
+# `pnpm gates:verify`. Safety comes instead from the verifier itself: it refuses to
+# overwrite an existing path, always removes fixtures in a `finally`, and fails if a
+# fixture survives.

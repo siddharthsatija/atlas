@@ -19,6 +19,7 @@
     "db:stop": "supabase stop",
     "db:types": "supabase gen types typescript --local > src/types/database.generated.ts",
     "db:validate-migrations": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/validate-migrations.mts",
+    "deps:verify": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-dependencies.mts",
     "dev": "next dev",
     "env:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/check-environment.mts",
     "env:check:production": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-environment.mts --env production",
@@ -29,6 +30,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "husky",
+    "scan:secrets": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/scan-secrets.mts",
     "start": "next start",
     "sync:pr-template": "node scripts/sync-pr-template.mjs",
     "test": "vitest run",
@@ -112,11 +114,6 @@
     "overrides": {
       "postcss": "8.5.25",
       "sharp": "0.35.3"
-    },
-    "auditConfig": {
-      "ignoreGhsas": [
-        "GHSA-mh99-v99m-4gvg"
-      ]
     }
   }
 }

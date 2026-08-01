@@ -23,10 +23,16 @@ function PageContainer({ className, ...props }: React.ComponentProps<"div">) {
 /**
  * Page heading region. Exactly one <h1> per page, and it is the focus target on
  * route change (accessibility skill).
+ *
+ * Rendered as a `div`, not a `header`: inside the shell this sits within `<main>`,
+ * where HTML-AAM gives `<header>` no landmark role — but tooling disagrees
+ * (testing-library resolves it as a second `banner` while axe does not). A `div`
+ * removes the ambiguity entirely, and this region is a visual grouping rather than
+ * a landmark. The page banner is the top bar (ATL-005).
  */
-function PageHeader({ className, ...props }: React.ComponentProps<"header">) {
+function PageHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <header
+    <div
       data-slot="page-header"
       className={cn("flex flex-col gap-2 pt-8 pb-6", className)}
       {...props}
@@ -53,7 +59,13 @@ function PageDescription({ className, ...props }: React.ComponentProps<"p">) {
   );
 }
 
-/** Main landmark. One per page; the skip link targets `id="main"`. */
+/**
+ * Main landmark for pages rendered OUTSIDE the product shell.
+ *
+ * Inside `(product)`, `AppShell` already provides `<main id="main">` (ATL-005), so
+ * product pages compose `PageContainer` / `PageHeader` / `PageTitle` instead —
+ * using this there would create a second `main` landmark.
+ */
 function PageContent({ className, ...props }: React.ComponentProps<"main">) {
   return <main id="main" data-slot="page-content" className={cn("pb-16", className)} {...props} />;
 }

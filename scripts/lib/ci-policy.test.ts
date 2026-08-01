@@ -21,9 +21,9 @@ function completeWorkflow(omit?: string): string {
     "jobs:",
     "  gates:",
     "    steps:",
-    ...REQUIRED_GATES.filter((g) => g.command !== omit).map(
-      (g) => `      - run: pnpm ${g.command}`,
-    ),
+    ...REQUIRED_GATES.flatMap((g) => g.commands)
+      .filter((command) => command !== omit)
+      .map((command) => `      - run: pnpm ${command}`),
     "",
   ].join("\n");
 }
@@ -98,22 +98,21 @@ describe("required gate coverage", () => {
   });
 
   it("accepts gates spread across several pull-request workflows", () => {
-    const half = REQUIRED_GATES.slice(0, 4);
-    const rest = REQUIRED_GATES.slice(4);
-    const build = (gates: typeof half) =>
+    const all = REQUIRED_GATES.flatMap((g) => g.commands);
+    const build = (commands: readonly string[]) =>
       [
         "on:",
         "  pull_request:",
         "jobs:",
         "  j:",
         "    steps:",
-        ...gates.map((g) => `      - run: pnpm ${g.command}`),
+        ...commands.map((command) => `      - run: pnpm ${command}`),
       ].join("\n");
 
     expect(
       findMissingGates([
-        { file: "a.yml", content: build(half) },
-        { file: "b.yml", content: build(rest as typeof half) },
+        { file: "a.yml", content: build(all.slice(0, 4)) },
+        { file: "b.yml", content: build(all.slice(4)) },
       ]),
     ).toEqual([]);
   });

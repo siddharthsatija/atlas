@@ -151,7 +151,7 @@ rotated immediately and the exposure documented.
 | `pnpm test:e2e`, `test:a11y`                                      | Chromium binary + system libs   | fails at browser launch          |
 | `pnpm db:*`                                                       | Docker                          | fails to start the stack         |
 | `pnpm test:integration`                                           | Docker + at least one migration | **no migrations exist yet (M3)** |
-| `pnpm audit`                                                      | network (npm registry)          | fails offline                    |
+| `pnpm audit`, `deps:verify`                                       | network (npm registry)          | fails offline                    |
 
 No command requires production credentials. Local `.env.local` uses non-secret
 placeholders plus two keys you generate yourself.
@@ -177,6 +177,8 @@ placeholders plus two keys you generate yourself.
 | `pnpm verify:all`              | Everything CI requires, in order       |
 | `pnpm ci:verify-policy`        | Assert CI holds no production secrets and every architecture §19 gate runs on PRs |
 | `pnpm gates:verify`            | Prove each gate blocks on a deliberate defect (`--only`, `--skip`) |
+| `pnpm scan:secrets`            | Scan the working tree for credentials (redacted output) |
+| `pnpm deps:verify`             | Dependency advisories vs. the time-boxed exception policy |
 
 ### Testing
 
