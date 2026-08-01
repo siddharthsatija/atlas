@@ -19,10 +19,13 @@ Use semantic tokens rather than raw color names in components.
 - `border-strong`
 - `accent`
 - `accent-subtle`
+- `accent-foreground`
 - `success`
 - `warning`
 - `danger`
+- `danger-foreground`
 - `info`
+- `scrim`
 
 Rules:
 
@@ -33,7 +36,13 @@ Rules:
 
 ### 2.1 Baseline palette values
 
-Starting values for ATL-008. These are the implementation baseline; every text/background pairing must be verified against WCAG 2.2 AA contrast during token implementation, and adjustments stay within these hue families.
+Baseline values. ATL-008 verified every pairing programmatically against WCAG 2.2 AA
+and adjusted seven values within their hue families; the table below is the **verified**
+palette, and the adjustments are recorded in §2.2.
+
+The implemented source of truth is `src/styles/tokens.css`; verification lives in
+`src/styles/contrast.test.ts` and the generated sheet in
+`src/styles/__snapshots__/token-sheet.md`.
 
 | Token            | Light                   | Dark      |
 | ---------------- | ----------------------- | --------- |
@@ -43,15 +52,51 @@ Starting values for ATL-008. These are the implementation baseline; every text/b
 | `surface-subtle` | `#F1F3F6`               | `#14171C` |
 | `text-primary`   | `#16181D`               | `#F2F4F8` |
 | `text-secondary` | `#4A5160`               | `#B4BAC7` |
-| `text-muted`     | `#6E7688`               | `#838B9B` |
+| `text-muted`     | `#686F80`               | `#838B9B` |
 | `border-default` | `#E3E6EC`               | `#262B34` |
-| `border-strong`  | `#C9CEDA`               | `#3A4150` |
-| `accent`         | `#4F5BD5`               | `#7B86E8` |
-| `accent-subtle`  | `#EEF0FC`               | `#232848` |
-| `success`        | `#1F7A4D`               | `#3DA972` |
-| `warning`        | `#B0680F`               | `#D08C2E` |
-| `danger`         | `#B3352E`               | `#E06A5F` |
+| `border-strong`  | `#8590AC`               | `#5B667D` |
+| `accent`         | `#4C58D4`               | `#828DE9` |
+| `accent-subtle`  | `#EEF0FC`               | `#212644` |
+| `success`        | `#1E7449`               | `#3DA972` |
+| `warning`        | `#95580D`               | `#D08C2E` |
+| `danger`         | `#B3352E`               | `#E27267` |
 | `info`           | `#2563A8`               | `#5B9BD8` |
+| `accent-foreground` | `#FFFFFF`            | `#101216` |
+| `danger-foreground` | `#FFFFFF`            | `#101216` |
+
+### 2.2 Verified deviations from the starting values (ATL-008)
+
+Every change preserves hue and saturation and adjusts lightness only.
+
+| Token | Mode | Was | Now | Why |
+| --- | --- | --- | --- | --- |
+| `text-muted` | light | `#6E7688` | `#686F80` | 4.10:1 on `surface-subtle` — below 4.5 |
+| `warning` | light | `#B0680F` | `#95580D` | 3.91:1 on `surface-subtle`, and 4.43:1 on its own 10% tint |
+| `accent` | light | `#4F5BD5` | `#4C58D4` | 4.37:1 on its own 10% tint |
+| `success` | light | `#1F7A4D` | `#1E7449` | 4.20:1 on its own 10% tint over `surface-subtle` |
+| `border-strong` | light | `#C9CEDA` | `#8590AC` | 1.50:1 — below the 3:1 required of an interactive boundary (SC 1.4.11) |
+| `accent` | dark | `#7B86E8` | `#828DE9` | 4.23:1 on its own 10% tint over `surface-raised` |
+| `accent-subtle` | dark | `#232848` | `#212644` | accent text on it measured 4.37:1 |
+| `danger` | dark | `#E06A5F` | `#E27267` | 4.4:1 on its own 10% tint |
+| `border-strong` | dark | `#3A4150` | `#5B667D` | 1.83:1 — below 3:1 (SC 1.4.11) |
+
+### 2.3 Two roles added
+
+A single `white` foreground cannot serve solid fills in both modes: dark-mode
+`accent` is intentionally light, so white-on-accent measures 3.27:1 there. Two
+roles were added so the token layer can express an accessible solid fill:
+
+- `accent-foreground` — label on a solid `accent` fill (primary button)
+- `danger-foreground` — label on a solid `danger` fill (destructive button)
+
+Components must use these rather than a literal colour.
+
+### 2.4 Border roles and SC 1.4.11
+
+- `border-default` provides **decorative** separation. It never carries information
+  needed to identify a control, so the 3:1 non-text requirement does not apply.
+- `border-strong` is the token for **interactive component boundaries** (inputs,
+  selected states) and meets 3:1 against `background` and `surface` in both modes.
 
 ## 3. Typography
 

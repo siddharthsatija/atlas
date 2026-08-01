@@ -8,6 +8,36 @@
  * Keep this list minimal. Anything expressible as a utility class belongs in CSS.
  */
 
+/**
+ * Semantic colour roles (design system §2 and §2.3).
+ *
+ * The single list: the token sheet renders it, and `src/styles/palette.ts` verifies
+ * every entry exists in both modes. Two lists would let the verified set and the
+ * displayed set drift apart.
+ */
+export const COLOR_ROLES = [
+  "background",
+  "surface",
+  "surface-raised",
+  "surface-subtle",
+  "text-primary",
+  "text-secondary",
+  "text-muted",
+  "border-default",
+  "border-strong",
+  "accent",
+  "accent-subtle",
+  "accent-foreground",
+  "success",
+  "warning",
+  "danger",
+  "danger-foreground",
+  "info",
+  "scrim",
+] as const;
+
+export type ColorRole = (typeof COLOR_ROLES)[number];
+
 /** Milliseconds. Design system §14: standard 150–220, larger panels 220–300. */
 export const DURATION = {
   standard: 180,

@@ -36,10 +36,36 @@ describe("repository guards", () => {
     const offenders: string[] = [];
     for (const file of sourceFiles("src", ["ts", "tsx", "css"])) {
       if (file.endsWith("tokens.css")) continue; // the authorized token source
-      if (file.endsWith("tokens.test.ts")) continue; // asserts on hex by design
+      // These assert on colour values by nature: they verify the token source and
+      // the WCAG contrast primitives against known reference colours.
+      if (file.endsWith("tokens.test.ts")) continue;
+      if (file.endsWith("contrast.test.ts")) continue;
       if (/#[0-9a-fA-F]{6}\b/.test(read(file))) offenders.push(file.replace(ROOT, ""));
     }
     expect(offenders, "raw hex must live only in src/styles/tokens.css").toEqual([]);
+  });
+
+  it("uses no raw colour utilities in components", () => {
+    // ATL-008: colour reaches components only through semantic tokens.
+    // `transparent` and `current` are not colours — they are the absence of one
+    // and inheritance respectively — so both remain permitted.
+    const RAW_COLOUR =
+      /\b(?:bg|text|border|ring|fill|stroke|from|via|to|shadow|outline|decoration|accent|caret|divide|placeholder)-(?:white|black)\b/;
+    const TAILWIND_PALETTE =
+      /\b(?:bg|text|border|ring|fill|stroke)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/;
+
+    const offenders = sourceFiles("src/components", ["ts", "tsx"])
+      .concat(sourceFiles("src/app", ["ts", "tsx"]))
+      .filter((f) => !f.endsWith("repo-guards.test.ts"))
+      .filter((f) => {
+        const content = read(f);
+        return RAW_COLOUR.test(content) || TAILWIND_PALETTE.test(content);
+      });
+
+    expect(
+      offenders.map((f) => f.replace(ROOT, "")),
+      "colour must come from semantic tokens (design system §2)",
+    ).toEqual([]);
   });
 
   it("keeps browser storage out of application code", () => {

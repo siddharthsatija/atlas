@@ -26,11 +26,11 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-accent text-white hover:brightness-110 active:brightness-95",
+        primary: "bg-accent text-accent-foreground hover:brightness-110 active:brightness-95",
         secondary:
           "bg-surface text-text-primary border border-border-default hover:bg-surface-subtle active:bg-surface-subtle",
         tertiary: "text-text-secondary hover:bg-surface-subtle hover:text-text-primary",
-        destructive: "bg-danger text-white hover:brightness-110 active:brightness-95",
+        destructive: "bg-danger text-danger-foreground hover:brightness-110 active:brightness-95",
         icon: "text-text-secondary hover:bg-surface-subtle hover:text-text-primary",
         link: "text-accent underline-offset-4 hover:underline",
       },

@@ -9,6 +9,16 @@
  * (bg-surface, text-secondary, rounded-card) are generated from them. There is no
  * tailwind.config.js.
  *
+ * Contrast contract (ATL-008), verified programmatically by
+ * `src/styles/contrast.test.ts` — never by eye:
+ *   - text on any surface .................. >= 4.5:1  (WCAG 2.2 AA, SC 1.4.3)
+ *   - tone text on its own 10% tint ........ >= 4.5:1  (the badge/callout pattern)
+ *   - solid-fill foreground on its fill .... >= 4.5:1
+ *   - `border-strong`, focus ring .......... >= 3.0:1  (SC 1.4.11, non-text)
+ *   - `border-default` ..................... decorative separation only; it never
+ *     carries information needed to identify a control, so 1.4.11 does not apply.
+ *     Interactive boundaries (inputs, selected states) must use `border-strong`.
+ *
  * Rules enforced by review (.claude/skills/design-system/checklists.md):
  *   - Components reference semantic roles, never raw hex or framework palette names.
  *   - Dark mode is handled here, at the variable layer — never per component.
@@ -25,17 +35,25 @@
 
   --color-text-primary: #16181d;
   --color-text-secondary: #4a5160;
-  --color-text-muted: #6e7688;
+  --color-text-muted: #686f80;
 
   --color-border-default: #e3e6ec;
-  --color-border-strong: #c9ceda;
+  --color-border-strong: #8590ac;
 
-  --color-accent: #4f5bd5;
+  --color-accent: #4c58d4;
   --color-accent-subtle: #eef0fc;
+  /* Foreground for solid accent/danger fills. A fixed `white` cannot work in both
+     modes: dark-mode accent is intentionally light, so white-on-accent measures
+     3.27:1 there. These roles adapt instead. */
+  --color-accent-foreground: #ffffff;
 
-  --color-success: #1f7a4d;
-  --color-warning: #b0680f;
+  --color-success: #1e7449;
+  --color-warning: #95580d;
   --color-danger: #b3352e;
+  --color-danger-foreground: #ffffff;
+  /* Modal scrim. Applied with an opacity modifier (`bg-scrim/50`). Deliberately
+     identical in both modes: a scrim darkens whatever is behind it. */
+  --color-scrim: #0b0d11;
   --color-info: #2563a8;
 
   /* --- Typography (design system §3) -------------------------------------- */
@@ -105,14 +123,17 @@
     --color-text-muted: #838b9b;
 
     --color-border-default: #262b34;
-    --color-border-strong: #3a4150;
+    --color-border-strong: #5b667d;
 
-    --color-accent: #7b86e8;
-    --color-accent-subtle: #232848;
+    --color-accent: #828de9;
+    --color-accent-subtle: #212644;
+    --color-accent-foreground: #101216;
 
     --color-success: #3da972;
     --color-warning: #d08c2e;
-    --color-danger: #e06a5f;
+    --color-danger: #e27267;
+    --color-danger-foreground: #101216;
+    --color-scrim: #0b0d11;
     --color-info: #5b9bd8;
 
     /* Shadows read heavier on dark surfaces; keep them restrained. */
