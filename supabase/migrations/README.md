@@ -47,9 +47,35 @@ Breaking changes use **expand / contract**, forward-only:
 4. Stop writing the old path
 5. Contract later, in its own deliberate migration
 
+## Automated validation
+
+`pnpm db:validate-migrations` runs as a required CI gate (ATL-004) and diffs this
+directory against the pull request's base branch. It fails on:
+
+| Rule | Meaning |
+| --- | --- |
+| `migration-modified` | A migration that already exists in the base was edited |
+| `migration-deleted` | A committed migration was removed |
+| `migration-inserted-out-of-order` | A new migration sorts before the latest committed one |
+| `invalid-filename` | Not `YYYYMMDDHHMMSS_snake_case.sql` |
+| `duplicate-timestamp` | Two migrations share a timestamp, making order ambiguous |
+| `table-without-rls` | `create table` without `enable row level security` in the same migration |
+| `table-without-policies` | RLS enabled but no policy, and no declared deny-all intent |
+
+Content rules apply to **new** migrations only: a committed migration cannot be
+edited without violating append-only, so it is never re-reported.
+
+Internal tables that intentionally have RLS with no client policies
+(`audit_events`, `user_encryption_keys` — ADR-006) must declare that intent:
+
+```sql
+-- rls: deny-all (internal table; server-only writer, ADR-006)
+```
+
 ## Before opening the PR
 
 - [ ] Two-user RLS tests written (`supabase/tests/`) and added to the completeness list
+- [ ] `pnpm db:validate-migrations` passes
 - [ ] `pnpm db:reset` succeeds from scratch
 - [ ] `pnpm db:types` regenerated
 - [ ] Reviewed by `database-engineer` and `security-engineer`

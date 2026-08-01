@@ -49,3 +49,7 @@ pnpm-debug.log*
 /tmp/
 /scratch/
 *.export.json
+
+# Temporary fixtures written by `pnpm gates:verify` (always cleaned up).
+_gate-fixture*
+**/_gate-fixture*

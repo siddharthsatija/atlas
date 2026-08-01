@@ -22,6 +22,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Full history so migration validation can diff against the base ref.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
@@ -41,6 +44,16 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Migration validation (append-only)
+        run: pnpm db:validate-migrations
+        env:
+          # On a pull request, diff against the target branch; on push, against the
+          # previous commit on main.
+          ATLAS_MIGRATION_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
+
+      - name: CI policy (no production secrets; all §19 gates run on PRs)
+        run: pnpm ci:verify-policy
 
       - name: Unit tests with coverage
         run: pnpm test:coverage

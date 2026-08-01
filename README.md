@@ -175,6 +175,8 @@ placeholders plus two keys you generate yourself.
 | `pnpm lint` / `lint:fix`       | ESLint, including layer-boundary rules |
 | `pnpm typecheck`               | `tsc --noEmit`, strict                 |
 | `pnpm verify:all`              | Everything CI requires, in order       |
+| `pnpm ci:verify-policy`        | Assert CI holds no production secrets and every architecture §19 gate runs on PRs |
+| `pnpm gates:verify`            | Prove each gate blocks on a deliberate defect (`--only`, `--skip`) |
 
 ### Testing
 
@@ -204,6 +206,7 @@ Add `--skip-connectivity` to run the configuration and isolation checks offline.
 | `pnpm db:reset`             | Rebuild from migrations + seed. Refuses unless `ATLAS_ENV=local` |
 | `pnpm db:migrate:local`     | Apply all migrations from scratch (alias of `db:reset`)       |
 | `pnpm db:migrate:status`    | Which migrations are applied                                  |
+| `pnpm db:validate-migrations` | Append-only + RLS validation (required CI gate)             |
 | `pnpm db:types`             | Regenerate `src/types/database.generated.ts` |
 | `pnpm db:lint`              | Supabase schema lint                         |
 

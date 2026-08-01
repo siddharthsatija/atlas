@@ -27,7 +27,9 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "jsdom",
-          include: ["src/**/*.test.{ts,tsx}"],
+          // CI tooling in scripts/lib is unit-tested here too: the migration
+          // validator guards an irreversible repository invariant (ATL-004).
+          include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.ts"],
           exclude: ["src/**/*.integration.test.ts"],
         },
       },
