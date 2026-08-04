@@ -35,6 +35,32 @@ export default defineConfig({
       },
       {
         extends: true,
+        /**
+         * Resolve `server-only` the way a Server Component does.
+         *
+         * That package deliberately throws on import under every export condition
+         * except `react-server` — it is how a server module is prevented from being
+         * pulled into a client bundle. Integration tests exercise server code
+         * (`env.ts`, route handlers) in Node, where the throwing variant resolves
+         * and the suite dies on import.
+         *
+         * `resolve.conditions` alone does not fix it: node_modules are externalised
+         * and resolved by Node, not Vite. The alias therefore points at the
+         * package's own `empty.js` — the exact module the `react-server` condition
+         * selects — by absolute path, because that subpath is not listed in the
+         * package's `exports` map and cannot be requested by specifier.
+         *
+         * Scoped to this project only. The unit project keeps the real guard, so an
+         * accidental client import of a server module still fails there.
+         */
+        resolve: {
+          alias: {
+            "server-only": fileURLToPath(
+              new URL("./node_modules/server-only/empty.js", import.meta.url),
+            ),
+          },
+          conditions: ["react-server", "node"],
+        },
         test: {
           name: "integration",
           environment: "node",

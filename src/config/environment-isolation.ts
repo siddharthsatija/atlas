@@ -194,6 +194,104 @@ export function findIsolationViolations(env: ServerEnv): IsolationViolation[] {
     }
   }
 
+  // --- R8: hosted environments must have error monitoring configured -------
+  // ATL-095 + PRD launch checklist ("production monitoring enabled"). Deploying
+  // staging or production with no collector means an incident is discovered by a
+  // user report rather than an alert.
+  if (isRemote && !env.ATLAS_MONITORING_ENDPOINT) {
+    violations.push({
+      rule: "hosted-environment-requires-monitoring",
+      variables: ["ATLAS_MONITORING_ENDPOINT", "ATLAS_ENV"],
+      message: `ATLAS_ENV=${target} has no error-monitoring endpoint configured. Hosted environments must report errors (architecture §16, ATL-095).`,
+      severity: "error",
+    });
+  }
+
+  // --- R9: the monitoring endpoint must be HTTPS in hosted environments ----
+  // Error events carry route templates, release, and correlation IDs. Low
+  // sensitivity individually, but plaintext telemetry is a passive-observer gift
+  // and contradicts security §8 (TLS for all network connections).
+  if (isRemote && env.ATLAS_MONITORING_ENDPOINT) {
+    if (!env.ATLAS_MONITORING_ENDPOINT.startsWith("https://")) {
+      violations.push({
+        rule: "monitoring-endpoint-requires-https",
+        variables: ["ATLAS_MONITORING_ENDPOINT"],
+        message:
+          "ATLAS_MONITORING_ENDPOINT must use https outside local development (security §8).",
+        severity: "error",
+      });
+    }
+    if (isLoopback(env.ATLAS_MONITORING_ENDPOINT)) {
+      violations.push({
+        rule: "monitoring-endpoint-must-not-be-loopback",
+        variables: ["ATLAS_MONITORING_ENDPOINT", "ATLAS_ENV"],
+        message: `ATLAS_ENV=${target} points monitoring at a loopback host, so events go nowhere. Each environment reports to its own project (architecture §18).`,
+        severity: "error",
+      });
+    }
+  }
+
+  // --- R10: the monitoring credential must be its own secret ---------------
+  // "Separate DSN/keys per environment" (ATL-095). Reusing another subsystem's
+  // secret as the collector key would hand a third party a credential that also
+  // unlocks Supabase, the AI provider, or the rate-limit store.
+  if (env.ATLAS_MONITORING_KEY) {
+    for (const [name, value] of [
+      ["SUPABASE_SERVICE_ROLE_KEY", env.SUPABASE_SERVICE_ROLE_KEY],
+      ["NEXT_PUBLIC_SUPABASE_ANON_KEY", env.NEXT_PUBLIC_SUPABASE_ANON_KEY],
+      ["ATLAS_KEK", env.ATLAS_KEK],
+      ["AUDIT_HMAC_KEY", env.AUDIT_HMAC_KEY],
+      ["ANTHROPIC_API_KEY", env.ANTHROPIC_API_KEY],
+      ["RATE_LIMIT_REDIS_TOKEN", env.RATE_LIMIT_REDIS_TOKEN],
+    ] as const) {
+      if (env.ATLAS_MONITORING_KEY === value) {
+        violations.push({
+          rule: "monitoring-key-must-be-distinct",
+          variables: ["ATLAS_MONITORING_KEY", name],
+          message: `ATLAS_MONITORING_KEY is identical to ${name}. The monitoring credential is shared with a third-party collector and must never unlock another system (security §9).`,
+          severity: "error",
+        });
+      }
+    }
+
+    if (isRemote && looksLikePlaceholder(env.ATLAS_MONITORING_KEY)) {
+      violations.push({
+        rule: "no-placeholder-secrets-in-hosted-environments",
+        variables: ["ATLAS_MONITORING_KEY"],
+        message: `ATLAS_MONITORING_KEY looks like a placeholder or development value but ATLAS_ENV=${target}. Each environment uses its own real secret (security §9).`,
+        severity: "error",
+      });
+    }
+  }
+
+  // --- R11: Google OAuth must be configured as a pair ----------------------
+  // ATL-011. Google is optional, but half-configured is not a valid state: a
+  // client ID with no secret produces a provider that appears available and fails
+  // at the consent step, which reads to a user as "sign-in is broken".
+  const hasGoogleId = Boolean(env.ATLAS_GOOGLE_CLIENT_ID);
+  const hasGoogleSecret = Boolean(env.ATLAS_GOOGLE_CLIENT_SECRET);
+  if (hasGoogleId !== hasGoogleSecret) {
+    violations.push({
+      rule: "google-oauth-requires-both-credentials",
+      variables: ["ATLAS_GOOGLE_CLIENT_ID", "ATLAS_GOOGLE_CLIENT_SECRET"],
+      message:
+        "Google OAuth is partially configured. Set both the client ID and the secret, or neither — magic link is the primary method and works alone (security §5).",
+      severity: "error",
+    });
+  }
+
+  // --- R12: the OAuth secret must not be a placeholder in hosted environments
+  if (isRemote && env.ATLAS_GOOGLE_CLIENT_SECRET) {
+    if (looksLikePlaceholder(env.ATLAS_GOOGLE_CLIENT_SECRET)) {
+      violations.push({
+        rule: "no-placeholder-secrets-in-hosted-environments",
+        variables: ["ATLAS_GOOGLE_CLIENT_SECRET"],
+        message: `ATLAS_GOOGLE_CLIENT_SECRET looks like a placeholder or development value but ATLAS_ENV=${target}. Each environment uses its own real secret (security §9).`,
+        severity: "error",
+      });
+    }
+  }
+
   return violations;
 }
 

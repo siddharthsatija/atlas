@@ -80,6 +80,27 @@ Restricted data receives the strongest controls. Restricted text fields stored i
 - Define absolute and idle session lifetimes.
 - Rotate refresh tokens according to provider capabilities.
 
+#### Chosen lifetimes (ATL-013)
+
+| Limit        | Value    | What it defends against                                                  |
+| ------------ | -------- | ------------------------------------------------------------------------ |
+| **Idle**     | 14 days  | An unattended or borrowed device: a session left alone stops working.    |
+| **Absolute** | 90 days  | A stolen refresh token: continuous use can no longer extend a session indefinitely. |
+
+Supabase enforces neither — it expires access tokens (`jwt_expiry`, 1 hour) and
+rotates refresh tokens, but a refresh token stays valid while it keeps being used.
+Both limits are therefore enforced in `src/middleware.ts` against server-written
+`HttpOnly` marker cookies, with the policy in `src/lib/auth/session-lifetime.ts`.
+On expiry the provider session is revoked as well as the cookies cleared, so the
+limit is not merely cosmetic.
+
+**Known limitation.** Because the markers are cookies, a client that deliberately
+strips them restarts its own absolute clock. These limits therefore bound the
+realistic threat — an unattended or stolen *browser* — not a user determined to
+extend their own session. Closing it requires server-side session records, which
+arrive with the active-session list in ATL-075; the marker shape is deliberately
+minimal so that swap is contained.
+
 ## 6. Authorization
 
 ### Roles

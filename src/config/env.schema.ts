@@ -51,6 +51,33 @@ export const serverEnvSchema = z.object({
   // Serverless cannot rate-limit in memory; a shared durable store is required.
   RATE_LIMIT_REDIS_URL: z.url("RATE_LIMIT_REDIS_URL must be a valid URL"),
   RATE_LIMIT_REDIS_TOKEN: z.string().min(1, "RATE_LIMIT_REDIS_TOKEN is required"),
+
+  // --- Google OAuth (ATL-011, security §5) --------------------------------
+  // Optional: magic link is the primary method and the application works fully
+  // without Google. Both values are server-only — the browser receives only the
+  // consent URL the server builds, never the client secret.
+  ATLAS_GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  ATLAS_GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+
+  // --- Error monitoring (ATL-095, architecture §16) -----------------------
+  // Optional: local development and CI run without a collector, and monitoring
+  // being absent must not fail a developer's boot. Staging and production are
+  // held to a stricter standard by the isolation rules (architecture §18), which
+  // require monitoring to be configured, HTTPS, and distinct per environment.
+  //
+  // Server-only and deliberately NOT NEXT_PUBLIC: the browser reports through the
+  // first-party ingest route, so the collector credential never reaches a client
+  // bundle (security §9, CLAUDE.md).
+  ATLAS_MONITORING_ENDPOINT: z.url("ATLAS_MONITORING_ENDPOINT must be a valid URL").optional(),
+  ATLAS_MONITORING_KEY: z.string().min(1).optional(),
+  /** Build identifier for release tagging. Falls back to the platform's commit SHA. */
+  ATLAS_RELEASE: z
+    .string()
+    .regex(
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/,
+      "ATLAS_RELEASE must be an identifier-shaped build reference (no spaces or free text)",
+    )
+    .optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

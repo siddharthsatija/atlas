@@ -84,8 +84,27 @@ the merge.**
 1. **Upgrade the direct dependency** if it is ours and a patched version exists.
 2. **Override a transitive dependency** via `pnpm.overrides` when the parent pins a
    vulnerable version — then **verify the whole suite**, because an override forces a
-   version the parent never tested against. Precedent: overriding `brace-expansion`
-   to a patched major broke `minimatch@3` and crashed `pnpm lint`.
+   version the parent never tested against.
+
+   **Scope the override to the major the parent already depends on.** pnpm override
+   keys accept a range selector (`"pkg@^1.0.0": "1.1.18"`), so a tree containing two
+   majors of the same package gets each one patched inside its own line, and no
+   parent is handed an API it was never written against.
+
+   Both precedents are `brace-expansion`, and the difference between them is the
+   whole rule:
+   - ❌ A bare `"brace-expansion": "<patched major>"` forced 2.x onto `minimatch@3`,
+     which needs the 1.x `expand` export. `pnpm lint` crashed with
+     "TypeError: expand is not a function". Reverted as an unsafe forced upgrade.
+   - ✅ `"brace-expansion@^1.0.0": "1.1.18"` + `"brace-expansion@^5.0.0": "5.0.9"`
+     (GHSA-rgw5-rvv9-x895) patched both copies within their existing majors. Both
+     versions already satisfied the parents' declared ranges (`minimatch@3` wants
+     `^1.1.7`, `minimatch@10` wants `^5.0.8`), so nothing was forced at all.
+
+   If the patched version falls inside the parent's declared range, the override is
+   not a forced upgrade — it is pinning a version the parent already permits, and it
+   is the preferred outcome.
+
 3. **Replace the dependency** if it is unmaintained.
 4. **Accept the risk temporarily** — only when remediation is genuinely unavailable
    or breaking. This requires a time-boxed exception (below).

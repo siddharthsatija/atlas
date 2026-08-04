@@ -64,6 +64,20 @@ email_sent = 10
 sign_in_sign_ups = 30
 token_verifications = 30
 
+# Optional Google OAuth (ATL-011, security §5). The application must work fully
+# without it, so it is disabled locally by default and enabled per environment.
+#
+# Credentials come from the environment and are NEVER committed. They stay
+# server-side: the browser only ever receives the consent URL the server builds.
+#
+# `skip_nonce_check` is left at its default (false): the nonce is what binds the
+# ID token to this sign-in attempt and defeats token replay.
+[auth.external.google]
+enabled = false
+client_id = "env(ATLAS_GOOGLE_CLIENT_ID)"
+secret = "env(ATLAS_GOOGLE_CLIENT_SECRET)"
+redirect_uri = "http://localhost:54321/auth/v1/callback"
+
 [storage]
 enabled = true
 file_size_limit = "10MiB"

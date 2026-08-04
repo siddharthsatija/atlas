@@ -14,5 +14,16 @@ export async function register(): Promise<void> {
   // The env module is Node-only (it imports `server-only` and reads process.env).
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("./config/env");
+
+    // Error monitoring (ATL-095). Registered at boot so server-side errors are
+    // reported from the first request rather than from whenever some module
+    // happens to install a sink — the same reasoning that put the environment
+    // check here. Configuration is validated above, so this cannot fail on a
+    // malformed endpoint.
+    const [{ initErrorMonitoring }, { monitoringConfig }] = await Promise.all([
+      import("./lib/telemetry/monitoring"),
+      import("./config/monitoring"),
+    ]);
+    initErrorMonitoring(monitoringConfig);
   }
 }

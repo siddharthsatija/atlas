@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { ThemeProvider } from "./theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastProvider, ToastViewport } from "@/components/ui/toast";
+import { MonitoringProvider } from "./monitoring-provider";
 
 /**
  * Composes application-wide providers.
@@ -13,6 +14,9 @@ import { ToastProvider, ToastViewport } from "@/components/ui/toast";
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
+      {/* Registers the browser error sink (ATL-095). Renders nothing; placed
+          outermost so a failure in any provider below is still reported. */}
+      <MonitoringProvider />
       <ToastProvider>
         <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
         <ToastViewport />

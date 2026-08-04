@@ -31,6 +31,18 @@ function read(path: string): string {
   return execFileSync("cat", [path], { encoding: "utf8" });
 }
 
+/**
+ * Removes block and line comments so a guard asserts on code rather than prose.
+ *
+ * Deliberately naive — it does not understand comment markers inside string or
+ * regex literals. That is acceptable here: these guards only ever widen their
+ * match as a result, so the failure mode is a false alarm a human resolves, never
+ * a silently skipped violation.
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
 describe("repository guards", () => {
   it("contains no raw hex colors outside the token source", () => {
     const offenders: string[] = [];
@@ -71,9 +83,13 @@ describe("repository guards", () => {
   });
 
   it("keeps browser storage out of application code", () => {
+    // Comments are stripped first, for the same reason as the error-UI guard
+    // below: a module that deliberately avoids browser storage should be free to
+    // say so and explain what it uses instead. Prose cannot call an API, so this
+    // narrows the guard to real usage without weakening it.
     const offenders = sourceFiles("src", ["ts", "tsx"])
       .filter((f) => !f.endsWith("repo-guards.test.ts")) // this file names them by design
-      .filter((f) => /\b(localStorage|sessionStorage)\b/.test(read(f)));
+      .filter((f) => /\b(localStorage|sessionStorage)\b/.test(stripComments(read(f))));
     expect(offenders.map((f) => f.replace(ROOT, ""))).toEqual([]);
   });
 
@@ -101,5 +117,49 @@ describe("repository guards", () => {
   it("marks modules that read secrets as server-only", () => {
     // env.ts reads process.env and must never be reachable from client code.
     expect(read(join(ROOT, "src/config/env.ts"))).toMatch(/^import "server-only";/m);
+  });
+
+  it("never renders an error message or stack in error UI", () => {
+    /**
+     * ATL-010. The error surfaces are the one place in the application where an
+     * object full of restricted data is in scope and the temptation to "just show
+     * the message while debugging" is highest — and such a change reads as
+     * harmless in review. Architecture §16 forbids capturing message text; showing
+     * it to the user is strictly worse than logging it.
+     *
+     * `ErrorFallback` has no prop that accepts an error, so this asserts the rule
+     * at the boundaries that do hold one.
+     */
+    const errorSurfaces = sourceFiles("src/components/error", ["tsx"])
+      .concat(sourceFiles("src/app", ["tsx"]))
+      .filter((f) => !/\.test\.tsx?$/.test(f)); // tests name what they forbid
+
+    // Comments are stripped first. These files must be free to *explain* why they
+    // do not forward a message, a stack, or React's component stack; a guard that
+    // punished the explanation would push the reasoning out of the code.
+    const offenders = errorSurfaces.filter((file) =>
+      /\berror\??\.(message|stack)\b|\bcomponentStack\b/.test(stripComments(read(file))),
+    );
+
+    expect(
+      offenders.map((f) => f.replace(ROOT, "")),
+      "error UI must never render error.message, error.stack, or a component stack",
+    ).toEqual([]);
+  });
+
+  it("keeps error UI away from network transports", () => {
+    /**
+     * ATL-010/ATL-095: boundaries hand a built `ErrorReport` to the registered
+     * sink and nothing else. A boundary that called a transport directly would
+     * bypass report construction — which is the only thing standing between a raw
+     * error and the network.
+     */
+    const TRANSPORT = /\bfetch\s*\(|sendBeacon|XMLHttpRequest|axios/;
+
+    const offenders = sourceFiles("src/components/error", ["tsx"])
+      .filter((f) => !/\.test\.tsx?$/.test(f))
+      .filter((file) => TRANSPORT.test(stripComments(read(file))));
+
+    expect(offenders.map((f) => f.replace(ROOT, ""))).toEqual([]);
   });
 });

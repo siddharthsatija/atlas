@@ -81,7 +81,7 @@ describe("Sidebar", () => {
 
   it("keeps labels in the accessibility tree when collapsed", () => {
     // Collapsed shows icons only; the text must remain for screen readers (§3).
-    render(<Sidebar collapsed />);
+    render(<Sidebar defaultCollapsed />);
     for (const item of PRIMARY_NAV_ITEMS) {
       expect(screen.getByRole("link", { name: item.label })).toBeInTheDocument();
     }
@@ -96,8 +96,10 @@ describe("Sidebar", () => {
     expect(responsive).toHaveClass("lg:w-64");
     unmount();
 
-    // `collapsed` forces the rail at every width (the seam ATL-006 will drive).
-    render(<Sidebar collapsed />);
+    // `defaultCollapsed` forces the rail at every width. ATL-006 renamed the prop
+    // when it took ownership of the state: the value is now an *initial* state the
+    // control mutates, not a fixed one the parent dictates.
+    render(<Sidebar defaultCollapsed />);
     const forced = screen.getByRole("navigation", { name: "Primary" });
     expect(forced).toHaveClass("w-20");
     expect(forced).not.toHaveClass("lg:w-64");

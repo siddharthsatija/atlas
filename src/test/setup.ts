@@ -19,22 +19,31 @@ afterEach(() => {
  */
 export const FIXED_NOW = new Date("2026-07-29T12:00:00.000Z");
 
-// matchMedia is required by next-themes and by reduced-motion behavior.
-Object.defineProperty(window, "matchMedia", {
-  writable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
-});
+/**
+ * Browser shims, applied only in the jsdom (unit) project.
+ *
+ * The integration project runs in the `node` environment, where `window` does not
+ * exist and these would throw during setup — taking the whole suite with them
+ * before a single test ran. The guard keeps one setup file serving both projects.
+ */
+if (typeof window !== "undefined") {
+  // matchMedia is required by next-themes and by reduced-motion behavior.
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
 
-// ResizeObserver is required by several Radix primitives under jsdom.
-global.ResizeObserver = class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-};
+  // ResizeObserver is required by several Radix primitives under jsdom.
+  global.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

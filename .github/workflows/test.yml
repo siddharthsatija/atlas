@@ -33,19 +33,17 @@ jobs:
     name: Integration tests (RLS, services, jobs)
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # INACTIVE until the first migration exists.
+    # ACTIVE since ATL-015, which added the first migration (`profiles`).
     #
-    # WHY: integration tests verify RLS policies, service authorization, and job
-    # behavior against a real database. There is no schema yet, so this job would
-    # execute zero assertions and report green — a false pass on the single most
-    # security-critical test suite in the project (threat T1, ATL-088).
+    # This job was previously gated to workflow_dispatch because with no schema
+    # it would have executed zero assertions and reported green — a false pass on
+    # the single most security-critical suite in the project (threat T1, ATL-088).
+    # That condition no longer holds: `tests/integration/profiles-rls.test.ts`
+    # exercises the two-user RLS matrix security §7 requires.
     #
-    # ACTIVATING TICKET: ATL-027 (digital asset schema), milestone M3/M5.
-    # When the first migration lands, delete the `if:` guard below.
-    #
-    # It is still runnable on demand via workflow_dispatch, and the guard step
-    # makes it FAIL LOUDLY rather than silently pass if invoked prematurely.
-    if: github.event_name == 'workflow_dispatch'
+    # The guard step below is deliberately KEPT. It is no longer about activation
+    # but about regression: if the migrations directory were ever emptied, this
+    # job must fail loudly rather than pass with nothing to test.
     steps:
       - uses: actions/checkout@v5
 
@@ -54,9 +52,9 @@ jobs:
           set -euo pipefail
           migrations=$(find supabase/migrations -name '*.sql' 2>/dev/null | wc -l)
           if [ "$migrations" -eq 0 ]; then
-            echo "::error title=Integration tests not yet active::No migrations found in supabase/migrations."
-            echo "This job is inactive until ATL-027 lands (see .claude/implementation-order.md)."
-            echo "Running it now would execute zero assertions and falsely report success."
+            echo "::error title=No migrations found::supabase/migrations is empty."
+            echo "The first migration landed in ATL-015. An empty directory now means it was removed,"
+            echo "which would make this job execute zero assertions and falsely report success."
             exit 1
           fi
           echo "Found $migrations migration(s); proceeding."

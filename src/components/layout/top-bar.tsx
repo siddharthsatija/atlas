@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { BellIcon, SearchIcon, SparklesIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { findActiveNavItem } from "@/config/navigation";
+import { MobileNav } from "./mobile-nav";
 
 /**
  * Sticky top bar (ATL-005), per frontend spec §4.
@@ -62,6 +63,11 @@ export function TopBar() {
         "flex h-16 shrink-0 items-center gap-2 px-4 sm:px-6",
       )}
     >
+      {/* Mobile navigation trigger (ATL-007). First in the bar so it is the first
+          thing a keyboard user reaches on the layout where it is the *only* route
+          to navigation. Hides itself from `sm` upward. */}
+      <MobileNav />
+
       {/* Section indicator. `aria-live` is deliberately absent: route changes are
           announced by the focus move to the page heading, not by this label. */}
       <p data-slot="top-bar-title" className="text-body font-medium">

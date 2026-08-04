@@ -58,6 +58,9 @@ function hostedEnv(overrides: Partial<ServerEnv> = {}): ServerEnv {
     ANTHROPIC_API_KEY: "sk-ant-api03-realvaluehere",
     RATE_LIMIT_REDIS_URL: "https://eu1-rate-limit.upstash.io",
     RATE_LIMIT_REDIS_TOKEN: "AX9sASQgN2M0",
+    // ATL-095: hosted environments must report errors somewhere (R8).
+    ATLAS_MONITORING_ENDPOINT: "https://collector.example.com/staging/ingest",
+    ATLAS_MONITORING_KEY: "mon_9f2b7c1dRealValue",
     ...overrides,
   });
 }
@@ -202,6 +205,118 @@ describe("environment isolation", () => {
       const preview = env({ ATLAS_ENV: "preview", SUPABASE_SERVICE_ROLE_KEY: "ci-placeholder" });
       expect(rules(local)).not.toContain("no-placeholder-secrets-in-hosted-environments");
       expect(rules(preview)).not.toContain("no-placeholder-secrets-in-hosted-environments");
+    });
+  });
+
+  describe("R8 hosted environments must have error monitoring configured", () => {
+    it.each(["staging", "production"] as const)("requires an endpoint in %s", (target) => {
+      const e = hostedEnv({
+        ATLAS_ENV: target,
+        NEXT_PUBLIC_APP_URL: "https://atlas.app",
+        ATLAS_MONITORING_ENDPOINT: undefined,
+      });
+      expect(rules(e)).toContain("hosted-environment-requires-monitoring");
+    });
+
+    it("does not require monitoring locally or in preview", () => {
+      // A developer must be able to boot without a collector (ATL-095).
+      expect(rules(env())).not.toContain("hosted-environment-requires-monitoring");
+      expect(rules(env({ ATLAS_ENV: "preview" }))).not.toContain(
+        "hosted-environment-requires-monitoring",
+      );
+    });
+  });
+
+  describe("R9 the monitoring endpoint must be reachable and encrypted", () => {
+    it("rejects a plaintext endpoint in a hosted environment", () => {
+      const e = hostedEnv({ ATLAS_MONITORING_ENDPOINT: "http://collector.example.com/ingest" });
+      expect(rules(e)).toContain("monitoring-endpoint-requires-https");
+    });
+
+    it("rejects a loopback endpoint in a hosted environment", () => {
+      // Points at nothing once deployed — events would vanish silently.
+      const e = hostedEnv({ ATLAS_MONITORING_ENDPOINT: "https://127.0.0.1:9000/ingest" });
+      expect(rules(e)).toContain("monitoring-endpoint-must-not-be-loopback");
+    });
+
+    it("permits a plaintext loopback collector locally", () => {
+      const e = env({ ATLAS_MONITORING_ENDPOINT: "http://127.0.0.1:9000/ingest" });
+      expect(findIsolationViolations(e)).toEqual([]);
+    });
+  });
+
+  describe("R10 the monitoring credential must be its own secret", () => {
+    it.each([
+      ["SUPABASE_SERVICE_ROLE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.service"],
+      ["NEXT_PUBLIC_SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.anon"],
+      ["ANTHROPIC_API_KEY", "sk-ant-api03-realvaluehere"],
+      ["RATE_LIMIT_REDIS_TOKEN", "AX9sASQgN2M0"],
+    ])("rejects reusing %s as the collector key", (_name, value) => {
+      // The collector is a third party. A shared credential would hand it a key
+      // that also unlocks Supabase or the AI provider.
+      const e = hostedEnv({ ATLAS_MONITORING_KEY: value });
+      expect(rules(e)).toContain("monitoring-key-must-be-distinct");
+    });
+
+    it("rejects reusing the KEK or the audit HMAC key", () => {
+      expect(rules(hostedEnv({ ATLAS_MONITORING_KEY: HOSTED_KEK }))).toContain(
+        "monitoring-key-must-be-distinct",
+      );
+      expect(rules(hostedEnv({ ATLAS_MONITORING_KEY: HOSTED_HMAC }))).toContain(
+        "monitoring-key-must-be-distinct",
+      );
+    });
+
+    it("rejects a placeholder collector key in a hosted environment", () => {
+      const e = hostedEnv({ ATLAS_MONITORING_KEY: "changeme" });
+      expect(rules(e)).toContain("no-placeholder-secrets-in-hosted-environments");
+    });
+
+    it("accepts a distinct, real-looking collector key", () => {
+      expect(findIsolationViolations(hostedEnv())).toEqual([]);
+    });
+  });
+
+  describe("R11 Google OAuth must be configured as a pair", () => {
+    it("accepts neither credential — magic link is the primary method", () => {
+      // §5 makes Google optional. Absence must not be an error.
+      expect(rules(env())).not.toContain("google-oauth-requires-both-credentials");
+      expect(rules(hostedEnv())).not.toContain("google-oauth-requires-both-credentials");
+    });
+
+    it("accepts both credentials", () => {
+      const e = hostedEnv({
+        ATLAS_GOOGLE_CLIENT_ID: "1234.apps.googleusercontent.com",
+        ATLAS_GOOGLE_CLIENT_SECRET: "GOCSPX-realvaluehere",
+      });
+      expect(findIsolationViolations(e)).toEqual([]);
+    });
+
+    it.each([
+      ["only the client ID", { ATLAS_GOOGLE_CLIENT_ID: "1234.apps.googleusercontent.com" }],
+      ["only the secret", { ATLAS_GOOGLE_CLIENT_SECRET: "GOCSPX-realvaluehere" }],
+    ])("rejects %s", (_label, overrides) => {
+      // Half-configured presents a provider that appears available and fails at
+      // the consent step, which reads to a user as "sign-in is broken".
+      expect(rules(hostedEnv(overrides))).toContain("google-oauth-requires-both-credentials");
+    });
+  });
+
+  describe("R12 the OAuth secret must be real in hosted environments", () => {
+    it("rejects a placeholder secret", () => {
+      const e = hostedEnv({
+        ATLAS_GOOGLE_CLIENT_ID: "1234.apps.googleusercontent.com",
+        ATLAS_GOOGLE_CLIENT_SECRET: "changeme",
+      });
+      expect(rules(e)).toContain("no-placeholder-secrets-in-hosted-environments");
+    });
+
+    it("permits a placeholder locally", () => {
+      const e = env({
+        ATLAS_GOOGLE_CLIENT_ID: "local-dev-client-id",
+        ATLAS_GOOGLE_CLIENT_SECRET: "local-dev-placeholder",
+      });
+      expect(rules(e)).not.toContain("no-placeholder-secrets-in-hosted-environments");
     });
   });
 
