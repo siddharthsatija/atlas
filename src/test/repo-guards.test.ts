@@ -147,6 +147,54 @@ describe("repository guards", () => {
     ).toEqual([]);
   });
 
+  it("keeps cryptography out of client-reachable code", () => {
+    /**
+     * ATL-084. The ESLint layer boundaries stop `src/components` and
+     * `src/features` importing `src/server`, but `src/app` is not in those
+     * zones — a `"use client"` file there could reach the crypto module and pull
+     * key handling into a browser bundle.
+     */
+    const offenders = sourceFiles("src", ["ts", "tsx"])
+      .filter((f) => !/\.test\.tsx?$/.test(f))
+      .filter((file) => {
+        const content = read(file);
+        return /^\s*["']use client["']/m.test(content) && /@\/server\/crypto/.test(content);
+      });
+
+    expect(
+      offenders.map((f) => f.replace(ROOT, "")),
+      "client components must never import the crypto module",
+    ).toEqual([]);
+  });
+
+  it("marks every secret-reading crypto module server-only", () => {
+    /**
+     * `envelope.ts` is deliberately exempt: it takes key material as arguments,
+     * reads no environment variable, and holds no secret, which is what allows
+     * its round-trip and tamper tests to run in the unit project on every pull
+     * request. Everything that touches the KEK or the database carries the
+     * marker.
+     */
+    const exempt = new Set(["envelope.ts", "envelope.test.ts"]);
+
+    const offenders = sourceFiles("src/server/crypto", ["ts"])
+      .filter((f) => !exempt.has(f.split("/").pop() ?? ""))
+      .filter((f) => !/\.test\.ts$/.test(f))
+      .filter((file) => !/^import "server-only";/m.test(read(file)));
+
+    expect(offenders.map((f) => f.replace(ROOT, ""))).toEqual([]);
+  });
+
+  it("keeps key material out of logs", () => {
+    // `no-console` already covers the obvious case; this catches a logger being
+    // introduced into the one place where a stray line prints a key.
+    const offenders = sourceFiles("src/server/crypto", ["ts"])
+      .filter((f) => !/\.test\.ts$/.test(f))
+      .filter((file) => /\bconsole\.|\blogger\b/.test(stripComments(read(file))));
+
+    expect(offenders.map((f) => f.replace(ROOT, ""))).toEqual([]);
+  });
+
   it("keeps error UI away from network transports", () => {
     /**
      * ATL-010/ATL-095: boundaries hand a built `ErrorReport` to the registered

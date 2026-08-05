@@ -41,14 +41,35 @@ describe("Sidebar", () => {
   it("renders navigation in the order defined by frontend §3", () => {
     render(<Sidebar />);
     const nav = screen.getByRole("navigation", { name: "Primary" });
-    const links = within(nav).getAllByRole("link");
 
-    // Wordmark first, then the six primary destinations, then Settings.
-    expect(links[0]).toHaveAccessibleName(/Atlas/);
-    expect(links.slice(1).map((l) => l.textContent)).toEqual([
-      ...PRIMARY_NAV_ITEMS.map((i) => i.label),
-      ...FOOTER_NAV_ITEMS.map((i) => i.label),
-    ]);
+    // The six primary destinations, then Settings.
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((l) => l.textContent),
+    ).toEqual([...PRIMARY_NAV_ITEMS.map((i) => i.label), ...FOOTER_NAV_ITEMS.map((i) => i.label)]);
+  });
+
+  it("keeps the wordmark out of the navigation landmark, ahead of it in §3 order", () => {
+    /**
+     * §3 item 1 is the wordmark, and it still comes first in the sidebar — but it
+     * is not a destination, so it does not belong inside the landmark that
+     * enumerates them. Inside, its accessible name ("Atlas — go to Overview")
+     * sits beside the real "Overview" link: two links to one route, and an
+     * ambiguous answer to "take me to Overview" for anyone navigating by name.
+     */
+    render(<Sidebar />);
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    const wordmark = screen.getByRole("link", { name: /^Atlas/ });
+
+    expect(nav).not.toContainElement(wordmark);
+    expect(wordmark.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("exposes exactly one link named Overview", () => {
+    // The regression the E2E suite caught as a strict-mode violation.
+    render(<Sidebar />);
+    expect(screen.getAllByRole("link", { name: "Overview" })).toHaveLength(1);
   });
 
   it("derives its order from the single NAV_ORDER source", () => {
@@ -88,10 +109,11 @@ describe("Sidebar", () => {
   });
 
   it("applies the widths required by §3, responsively", () => {
-    // The sidebar root IS the navigation landmark, so it is reachable by role.
+    // Width belongs to the sidebar container, not to the navigation landmark it
+    // holds: the wordmark and profile narrow with it too.
     // Rail (80px) by default, expanding to 256px from `lg` — §2 tablet uses the rail.
     const { unmount } = render(<Sidebar />);
-    const responsive = screen.getByRole("navigation", { name: "Primary" });
+    const responsive = screen.getByTestId("sidebar");
     expect(responsive).toHaveClass("w-20");
     expect(responsive).toHaveClass("lg:w-64");
     unmount();
@@ -100,7 +122,7 @@ describe("Sidebar", () => {
     // when it took ownership of the state: the value is now an *initial* state the
     // control mutates, not a fixed one the parent dictates.
     render(<Sidebar defaultCollapsed />);
-    const forced = screen.getByRole("navigation", { name: "Primary" });
+    const forced = screen.getByTestId("sidebar");
     expect(forced).toHaveClass("w-20");
     expect(forced).not.toHaveClass("lg:w-64");
   });

@@ -40,6 +40,17 @@ export const serverEnvSchema = z.object({
   // --- Encryption (ADR-003) ------------------------------------------------
   ATLAS_KEK: base64Key(32, "ATLAS_KEK"),
   ATLAS_KEK_VERSION: z.coerce.number().int().positive().default(1),
+  /**
+   * The superseded KEK, set only while a rotation sweep is in flight (ATL-084).
+   *
+   * Re-wrapping every DEK is not instantaneous. Without the previous generation
+   * in the process, un-swept users would be locked out of their own data between
+   * deploy and sweep completion. Both values are set together or neither is —
+   * enforced by an isolation rule, because a half-set pair would silently
+   * disable the fallback it exists to provide.
+   */
+  ATLAS_KEK_PREVIOUS: base64Key(32, "ATLAS_KEK_PREVIOUS").optional(),
+  ATLAS_KEK_PREVIOUS_VERSION: z.coerce.number().int().positive().optional(),
 
   // --- Audit logging (ADR-006) --------------------------------------------
   AUDIT_HMAC_KEY: base64Key(32, "AUDIT_HMAC_KEY"),

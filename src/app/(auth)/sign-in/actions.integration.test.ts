@@ -16,7 +16,16 @@ vi.mock("@/server/auth/supabase-server-client", () => ({
   createSupabaseServerClient: () => Promise.resolve({ auth: { signInWithOtp, signInWithOAuth } }),
 }));
 
-vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(cookieStore) }));
+/**
+ * Request headers are read for the rate-limit identifier (ATL-086). Mutable so a
+ * test can present a caller address.
+ */
+let requestHeaders = new Headers();
+
+vi.mock("next/headers", () => ({
+  cookies: () => Promise.resolve(cookieStore),
+  headers: () => Promise.resolve(requestHeaders),
+}));
 
 class RedirectSignal extends Error {
   constructor(readonly target: string) {
@@ -31,11 +40,20 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/config/env", () => ({
-  env: { NEXT_PUBLIC_APP_URL: "https://atlas.test", ATLAS_ENV: "production" },
+  env: {
+    NEXT_PUBLIC_APP_URL: "https://atlas.test",
+    ATLAS_ENV: "production",
+    // Read by the ATL-086 limiter: the HMAC key pseudonymises rate-limit
+    // identifiers. No counter store is configured, so the limiter is disabled
+    // and these tests exercise the sign-in flow rather than the limit.
+    AUDIT_HMAC_KEY: Buffer.alloc(32, 4).toString("base64"),
+    RATE_LIMIT_REDIS_URL: "",
+    RATE_LIMIT_REDIS_TOKEN: "",
+  },
 }));
 
-const { requestMagicLinkAction, startGoogleSignInAction, INITIAL_MAGIC_LINK_STATE } =
-  await import("./actions");
+const { requestMagicLinkAction, startGoogleSignInAction } = await import("./actions");
+const { INITIAL_MAGIC_LINK_STATE } = await import("./form-state");
 
 function formData(entries: Record<string, string>): FormData {
   const data = new FormData();
@@ -58,6 +76,7 @@ const storedReturnPath = () =>
     string | undefined;
 
 beforeEach(() => {
+  requestHeaders = new Headers();
   signInWithOtp.mockResolvedValue({ data: {}, error: null });
   signInWithOAuth.mockResolvedValue({
     data: { url: "https://accounts.google.com/o/oauth2/auth?x=1" },

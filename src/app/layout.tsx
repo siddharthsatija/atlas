@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { AppProviders } from "@/providers";
 import { APP_NAME } from "@/config/app";
+import { CSP_NONCE_HEADER } from "@/lib/security/content-security-policy";
 import "@/styles/globals.css";
 
 /**
@@ -41,7 +43,21 @@ export const viewport: Viewport = {
   userScalable: true,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  /**
+   * The per-request CSP nonce from middleware (ATL-087).
+   *
+   * Next stamps its own streamed bootstrap scripts automatically, but an inline
+   * script rendered by a *library* is invisible to that mechanism. `next-themes`
+   * emits one — the snippet that applies the stored theme before first paint —
+   * and without a nonce the policy blocks it, producing a light-mode flash on
+   * every load plus a violation report on every page.
+   *
+   * Reading it here rather than in the provider keeps `theme-provider.tsx` a
+   * client component: `headers()` is server-only.
+   */
+  const nonce = (await headers()).get(CSP_NONCE_HEADER) ?? undefined;
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
@@ -51,7 +67,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to content
         </a>
-        <AppProviders>{children}</AppProviders>
+        <AppProviders nonce={nonce}>{children}</AppProviders>
       </body>
     </html>
   );

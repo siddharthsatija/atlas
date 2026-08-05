@@ -207,10 +207,31 @@ export function Sidebar({ defaultCollapsed = false, onCollapsedChange }: Sidebar
     pathname === item.href || pathname.startsWith(`${item.href}/`);
 
   return (
-    <nav
-      id={navId}
-      aria-label="Primary"
+    /**
+     * The sidebar is a container, not a landmark.
+     *
+     * The `navigation` landmark below wraps the destination lists *only*. It
+     * previously wrapped this whole column, which put the wordmark link and the
+     * profile block inside the primary navigation — so a screen-reader user
+     * listing the primary destinations was handed "Atlas — go to Overview"
+     * alongside "Overview", two links to the same route, one of which is not a
+     * destination at all. Frontend §3 defines the order of the *sidebar*; it does
+     * not say the landmark encloses the wordmark or the profile, and enclosing
+     * them is what made "Overview" ambiguous.
+     *
+     * A plain `div` rather than `aside`: `aside` is a `complementary` landmark,
+     * and inventing one the specification does not call for trades one landmark
+     * problem for another.
+     */
+    <div
       data-slot="sidebar"
+      /**
+       * The container carries the width and collapse state but has no role and no
+       * accessible name — correctly so, since it is not a landmark. A test id is
+       * how Testing Library reaches an element that is deliberately invisible to
+       * the accessibility tree (same pattern as the sign-in form's return path).
+       */
+      data-testid="sidebar"
       data-collapsed={collapsed || undefined}
       className={cn(
         "flex h-full flex-col border-r border-border-default bg-surface",
@@ -247,22 +268,26 @@ export function Sidebar({ defaultCollapsed = false, onCollapsedChange }: Sidebar
         <CollapseControl collapsed={collapsed} navId={navId} onToggle={toggle} />
       </div>
 
-      {/* 3–8. Primary destinations. */}
-      <ul className="flex flex-col gap-1 px-3">
-        {PRIMARY_NAV_ITEMS.map((item) => (
-          <NavLink key={item.key} item={item} collapsed={collapsed} active={isActive(item)} />
-        ))}
-      </ul>
+      {/* 3–10. The navigation landmark: destinations and nothing else, so every
+              link a user finds here is somewhere they can go. */}
+      <nav id={navId} aria-label="Primary" data-slot="sidebar-nav" className="flex grow flex-col">
+        {/* 3–8. Primary destinations. */}
+        <ul className="flex flex-col gap-1 px-3">
+          {PRIMARY_NAV_ITEMS.map((item) => (
+            <NavLink key={item.key} item={item} collapsed={collapsed} active={isActive(item)} />
+          ))}
+        </ul>
 
-      {/* 9. Flexible spacer. */}
-      <div className="grow" />
+        {/* 9. Flexible spacer. */}
+        <div className="grow" />
 
-      {/* 10. Settings. */}
-      <ul className="flex flex-col gap-1 px-3">
-        {FOOTER_NAV_ITEMS.map((item) => (
-          <NavLink key={item.key} item={item} collapsed={collapsed} active={isActive(item)} />
-        ))}
-      </ul>
+        {/* 10. Settings. */}
+        <ul className="flex flex-col gap-1 px-3">
+          {FOOTER_NAV_ITEMS.map((item) => (
+            <NavLink key={item.key} item={item} collapsed={collapsed} active={isActive(item)} />
+          ))}
+        </ul>
+      </nav>
 
       {/* 11. User profile. Intentionally data-free until ATL-012/ATL-015. */}
       <div className="mt-2 border-t border-border-default p-3">
@@ -289,6 +314,6 @@ export function Sidebar({ defaultCollapsed = false, onCollapsedChange }: Sidebar
           </span>
         </div>
       </div>
-    </nav>
+    </div>
   );
 }

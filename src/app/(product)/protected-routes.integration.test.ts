@@ -27,6 +27,25 @@ class RedirectSignal extends Error {
   }
 }
 
+/**
+ * The layout gained an onboarding gate in ATL-016, which reaches the profile
+ * store through the service-role client. Stubbed here so this suite keeps
+ * asserting the ATL-012 redirect decision rather than the environment.
+ */
+vi.mock("@/config/env", () => ({
+  env: { AUDIT_HMAC_KEY: Buffer.alloc(32, 5).toString("base64") },
+}));
+vi.mock("@/server/db/service-role-client", () => ({ createServiceRoleClient: () => ({}) }));
+
+/** Onboarding already complete: this suite is about the session gate. */
+vi.mock("@/server/onboarding/onboarding-service", () => ({
+  OnboardingService: {
+    create: () => ({
+      start: () => Promise.resolve({ onboardingCompletedAt: "2026-08-01T00:00:00.000Z" }),
+    }),
+  },
+}));
+
 vi.mock("next/navigation", () => ({
   redirect: (target: string) => {
     throw new RedirectSignal(target);

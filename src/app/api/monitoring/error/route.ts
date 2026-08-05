@@ -2,6 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { captureMonitoringEvent } from "@/lib/telemetry/monitoring";
 import { monitoringConfig } from "@/config/monitoring";
+import {
+  RATE_LIMIT_POLICIES,
+  RateLimiter,
+  clientAddressFrom,
+} from "@/server/rate-limit/rate-limit";
 
 /**
  * First-party ingest for client-originated error reports (ATL-095).
@@ -76,6 +81,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const accepted = new NextResponse(null, { status: 204 });
 
   try {
+    /**
+     * Rate limit the ingest (ATL-086).
+     *
+     * An over-limit caller is dropped silently and still receives 204, rather
+     * than the 429 envelope other surfaces return. That is deliberate and
+     * matches this route's existing rule above: a telemetry endpoint that
+     * reported *why* it rejected something would be a probing oracle, and a 429
+     * is exactly such a report. The client has no useful response to a refused
+     * error report either way.
+     *
+     * Keyed on the caller's address only. There is no session here — the route
+     * exists so browser-side errors can be reported before or without one.
+     */
+    const address = clientAddressFrom(request.headers);
+    if (address) {
+      const limit = await RateLimiter.create().check(RATE_LIMIT_POLICIES.monitoringIngest, [
+        { kind: "ip", value: address },
+      ]);
+      if (!limit.allowed) return accepted;
+    }
+
     const declaredLength = Number(request.headers.get("content-length") ?? "0");
     if (declaredLength > MAX_BODY_BYTES) return accepted;
 

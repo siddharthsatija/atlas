@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAGIC_LINK_MESSAGES } from "@/lib/auth/auth-copy";
-import type { MagicLinkFormState } from "./actions";
+import type { MagicLinkFormState } from "./form-state";
 
 /**
  * ATL-014 — sign-in form behaviour.
@@ -17,7 +17,6 @@ const requestMagicLink = vi.fn();
 const startGoogleSignIn = vi.fn();
 
 vi.mock("./actions", () => ({
-  INITIAL_MAGIC_LINK_STATE: { code: null, attempt: 0 },
   requestMagicLinkAction: (previous: MagicLinkFormState, formData: FormData) =>
     requestMagicLink(previous, formData) as Promise<MagicLinkFormState>,
   startGoogleSignInAction: (formData: FormData) => startGoogleSignIn(formData) as Promise<void>,

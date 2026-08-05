@@ -1,16 +1,22 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { env } from "@/config/env";
 import { createSupabaseServerClient } from "@/server/auth/supabase-server-client";
 import { signInWithGoogle, signInWithMagicLink } from "@/server/auth/auth-service";
-import type { MagicLinkResultCode } from "@/lib/auth/auth-result";
+import type { MagicLinkFormState } from "./form-state";
 import {
   RETURN_PATH_COOKIE,
   returnPathCookieOptions,
   toSafeReturnPath,
 } from "@/lib/auth/return-path";
+import {
+  RATE_LIMIT_POLICIES,
+  RateLimiter,
+  clientAddressFrom,
+  type RateLimitIdentifier,
+} from "@/server/rate-limit/rate-limit";
 
 /**
  * Sign-in Server Actions (ATL-014).
@@ -23,18 +29,17 @@ import {
  * The result is one of ATL-011's closed codes, and the screen renders copy for it.
  */
 
-export interface MagicLinkFormState {
-  /** `null` before the first submission. */
-  code: MagicLinkResultCode | null;
-  /**
-   * Increments per submission so the UI can re-announce an unchanged result.
-   * Without it, submitting the same address twice produces an identical state
-   * object and a screen reader stays silent on the second attempt.
-   */
-  attempt: number;
+/**
+ * The caller's address as a rate-limit identifier, or nothing.
+ *
+ * An unidentifiable caller contributes no key rather than a shared placeholder:
+ * bucketing everyone whose address cannot be read under one counter would let a
+ * single one of them exhaust the window for all the others.
+ */
+function addressIdentifier(requestHeaders: Headers): RateLimitIdentifier[] {
+  const address = clientAddressFrom(requestHeaders);
+  return address ? [{ kind: "ip", value: address }] : [];
 }
-
-export const INITIAL_MAGIC_LINK_STATE: MagicLinkFormState = { code: null, attempt: 0 };
 
 /** Absolute URL the provider returns to. Must be an allowlisted redirect target. */
 function callbackUrl(): string {
@@ -81,6 +86,29 @@ export async function requestMagicLinkAction(
 
   if (typeof email !== "string") {
     return { code: "invalid_email", attempt };
+  }
+
+  /**
+   * Rate limit before contacting the provider (ATL-086, security §5).
+   *
+   * Keyed on the caller's address *and* the requested email, because the two
+   * catch different attacks: one host spraying many addresses trips the IP key,
+   * while a distributed attempt bombing a single inbox trips the address key.
+   *
+   * Checked here rather than after the provider call so a refused attempt costs
+   * nothing downstream and sends no mail. The result is the existing
+   * `rate_limited` code from ATL-011, so the screen already has copy for it and
+   * the response stays indistinguishable from any other outcome — a limit
+   * message that behaved differently for registered addresses would be the
+   * enumeration oracle security §5 forbids.
+   */
+  const limit = await RateLimiter.create().check(RATE_LIMIT_POLICIES.signIn, [
+    ...addressIdentifier(await headers()),
+    { kind: "email", value: email.trim().toLowerCase() },
+  ]);
+
+  if (!limit.allowed) {
+    return { code: "rate_limited", attempt };
   }
 
   const supabase = await createSupabaseServerClient();

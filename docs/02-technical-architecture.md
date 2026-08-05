@@ -188,7 +188,7 @@ All identifiers use UUIDs. All tables include `created_at` and `updated_at` unle
 - `user_id`
 - `service_name`
 - `service_domain`
-- `category`
+- `category`: the **kind of service** — `social`, `shopping`, `finance`, `email`, `entertainment`, `health`, `work`, `travel`, `other`. Defined in `src/lib/assets/categories.ts` (ATL-016, which needed it first for onboarding step 3) and inherited by ATL-027. Distinct from §7.3's data categories: `social` is what a service **is**, `contact` is what it **stores**
 - `account_identifier_encrypted`
 - `status`: active, inactive, archived, removed
 - `source_type`: manual, demo, connector, import
@@ -286,24 +286,38 @@ Named `data_requests` (not `deletion_requests`) because the MVP supports both de
 
 ### 7.9 activity_events
 
+The user-facing product timeline (PRD FR-09, frontend §13). RLS enabled: the owner may SELECT their own rows. There is **no INSERT, UPDATE, or DELETE policy** — events are written by services through the shared emitter (ATL-069), and rows leave with the account cascade.
+
 - `id`
 - `user_id`
-- `event_type`
-- `entity_type`
-- `entity_id`
-- `summary`
-- `metadata_redacted_json`
-- `occurred_at`
+- `event_type`: shape-constrained here, enumerated and typed in the application (ATL-069)
+- `entity_type`, `entity_id`: both or neither, enforced by a check constraint
+- `summary`: the line the user reads. No restricted values — masked identifiers at most (ATL-069)
+- `metadata_redacted_json`: allowlisted structured context, validated in the application by the ATL-085 redaction utility (`src/lib/activity/activity-metadata.ts`)
+- `occurred_at`, `created_at`
+
+**Client write access (ATL-068).** Undocumented before this ticket, so recorded here. A user cannot insert, edit, or delete individual events: a selectively-erasable timeline is a weaker record, including for the user who later wants to know when a change actually happened. ADR-006's "deleted with the account" is satisfied by the cascade. A future "clear history" action would be additive.
+
+**Metadata allowlist scope.** Only non-identifying categories are permitted today — statuses and transitions, counts, scores, classification labels, versions, and the demo flag. No free text and no identifiers beyond the `entity_id` column the table already models. The list grows with each feature milestone that emits new events, exactly as the ADR-006 audit inventory does.
+
+**Indexes.** `(user_id, occurred_at desc, id desc)` for the timeline, a partial index on `(user_id, entity_type, entity_id)` for entity links, and `(user_id, event_type, occurred_at desc)` for action filters. The `id` tiebreak is load-bearing: `occurred_at` is millisecond-resolution, so without it the sort is ambiguous and the cursor pagination ATL-070 requires can repeat or skip a row at a page boundary.
 
 ### 7.10 consents
 
+Append-only consent history. RLS enabled: the owner may SELECT their own rows (Settings renders the history, ATL-076); there is **no client INSERT policy**, because recording consent must stamp the server's policy version and emit an audit event.
+
 - `id`
 - `user_id`
-- `consent_type`
-- `policy_version`
-- `granted`
+- `consent_type`: one of `ai_processing`, `personal_fields_storage`, `ai_conversation_history`, `product_updates`
+- `policy_version`: the version in force when the decision was recorded. Never back-filled — consent is to the terms as they stood
+- `granted`: true for a grant, false for a revocation. Both are rows
 - `recorded_at`
-- `revoked_at`
+
+**Schema change (ATL-078).** This section previously also listed `revoked_at`. That column and ATL-078's requirement that "grant/revoke writes an immutable consent row" cannot both hold: populating `revoked_at` means mutating a row that is meant to be evidence of what was agreed at a point in time. An append-only log also makes grant → revoke → re-grant reconstructible, which a single mutable row cannot represent at all. `revoked_at` is therefore dropped; current state is the newest row per `(user_id, consent_type)`.
+
+**Immutability.** UPDATE is refused by trigger for every role including the owner. DELETE is *not* trigger-blocked, unlike `audit_events`: this table cascades from `auth.users`, and a raising BEFORE DELETE trigger would make account deletion impossible. DELETE is withheld by grant instead, which the cascade does not consult.
+
+**Policy version source.** `CONSENT_POLICY_VERSION` in `src/config/app.ts` — a reviewed constant rather than an environment variable, so every change to the terms is a code change with an author, a date, and a diff. Bump it when the policy text changes in a way that requires re-consent; the consent gate denies a grant recorded against a superseded version.
 
 ### 7.11 ai_interactions
 
@@ -385,14 +399,21 @@ Per-user wrapped data-encryption keys (see ADR-003). Service-role access only; n
 
 ### 7.17 idempotency_keys
 
-Backing store for idempotent transitions and jobs (§10).
+Backing store for idempotent transitions and jobs (§14). RLS enabled with **no client policies** (deny all); written only by the server-side idempotency service. Application role has SELECT, INSERT, UPDATE, and DELETE.
 
 - `id`
 - `user_id`
 - `scope`: e.g. request_transition, export_job
 - `idempotency_key`: unique with scope and user
-- `result_hash`
+- `result_encrypted`: the recorded result, envelope-encrypted per ADR-003 and AAD-bound to this table, column, and row. **NULL means the operation is claimed but still in flight.**
+- `result_hash`: SHA-256 of the canonical plaintext result, verified after decryption
 - `expires_at`: purged after 24 hours
+- `completed_at`, `created_at`
+- Set together or not at all: `result_encrypted`, `result_hash`, and `completed_at` are constrained all-or-nothing
+
+**Schema change (ATL-104).** This section previously listed `result_hash` alone. A hash can verify a result but cannot return one, so it could not satisfy the ATL-104 criterion that a duplicate submission "returns the recorded result". The payload is therefore stored — and stored encrypted, because copying results into a second table would otherwise create a lower-scrutiny duplicate of data that already lives somewhere better guarded. `result_hash` is retained: AES-GCM detects tampering with the ciphertext, while the hash detects a result that decrypts cleanly but is not what was recorded.
+
+**Claim before execute.** The row is inserted before the handler runs, so the unique index on `(user_id, scope, idempotency_key)` is what arbitrates concurrent submissions — exactly one caller wins the insert, and the loser is told the operation is in progress rather than duplicating its side effects. A claim whose handler fails is released so a retry can proceed. An expired claim is reclaimed in place under a guarded update rather than waiting for the purge job, so the TTL means 24 hours rather than "until a job happens to run".
 
 ### 7.18 ai_conversations and ai_messages
 
@@ -503,6 +524,8 @@ Example response envelope:
   "requestId": "uuid"
 }
 ```
+
+Implemented in `src/lib/api/response-envelope.ts` (ATL-086). It lives in `lib/` rather than `server/` so the client can narrow on `code` when rendering a failure — a duplicated copy of the codes for the UI is how a client ends up branching on a code the server stopped sending. `ApiErrorCode` is a closed union: a free-string code cannot be exhaustively handled, and architecture §10's "typed error codes, not raw provider errors" leaves no variant to smuggle a provider message into. `message` is calm, human-readable, and safe to display; callers branch on `code`.
 
 Error example:
 
@@ -695,6 +718,15 @@ Never capture:
 - Personal field values
 - Access tokens
 
+### Enforcement (ATL-085)
+
+Both lists above are enforced by `src/lib/telemetry/redaction.ts`, the central redaction utility named in security §T4. It is not advisory:
+
+- **Allowlist, not denylist.** A key reaches a log or collector only if a policy names it and its value passes that field's shape check. The "Never capture" list therefore has no field to travel in — omitting it is structural rather than a discipline to remember.
+- **Pattern scrubbing as defense in depth.** Surviving strings are additionally scanned for emails, phone numbers, and credentials. Patterns are anchored to real formats rather than resemblance: a generic "looks like a phone number" pattern matches an ISO-8601 instant, which silently destroyed every monitoring timestamp before it was caught. Precision is preferred to recall because the allowlist, not the scrub, carries the guarantee.
+- **Counted, not just dropped.** Removals are returned as dotted paths so a caller quietly trying to log something new is visible without reading payloads.
+- **Single entry point.** `src/lib/telemetry/logger.ts` is the only sanctioned logging call; it has no free-text `message` parameter, because interpolation is the most common way personal data reaches a log. `no-console` and a `no-restricted-syntax` rule for direct transports make bypassing it a lint failure.
+
 ## 17. Testing strategy
 
 ### Unit
@@ -704,7 +736,7 @@ Never capture:
 - Request state machine (including system transitions and idempotency)
 - Encryption module (round-trip, AAD binding, wrong-key failure, crypto-shred)
 - Input validation
-- Redaction (activity, notifications, audit context allowlist)
+- Redaction (central utility: allowlist, nested payloads, pattern scrubbing, lint rule; plus activity, notifications, audit context allowlist)
 - AI output validation
 
 ### Integration

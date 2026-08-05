@@ -9,6 +9,13 @@ import {
   serializeMarker,
   sessionMarkerCookieOptions,
 } from "@/lib/auth/session-lifetime";
+import {
+  CSP_NONCE_HEADER,
+  CSP_REPORT_PATH,
+  buildContentSecurityPolicy,
+  buildReportToHeader,
+  generateNonce,
+} from "@/lib/security/content-security-policy";
 
 /**
  * Route protection and session refresh (ATL-012).
@@ -39,8 +46,57 @@ import {
  * malformed value fails there.
  */
 export async function middleware(request: NextRequest): Promise<NextResponse> {
+  /**
+   * Content-Security-Policy (ATL-087).
+   *
+   * Wraps the routing and session work rather than being folded into it, because
+   * the policy must reach **every** response this middleware can produce — the
+   * pass-through, the sign-in redirect, and the session-expiry redirect. A
+   * header applied at one return point is a header missing from the other two,
+   * and the one that would be missing is on a redirect an attacker can trigger.
+   *
+   * The nonce is generated once per request and travels two ways: forward on the
+   * request headers, so the root layout can put it on the scripts it renders,
+   * and outward in the policy, so the browser accepts exactly those scripts.
+   */
+  const nonce = generateNonce();
+
+  // `isDevelopment` comes from `process.env` for the same reason the Supabase
+  // values do (see the module docstring): `@/config/env` validates base64 key
+  // material with `Buffer`, which the Edge runtime does not provide.
+  const policy = buildContentSecurityPolicy({
+    nonce,
+    isDevelopment: process.env.NODE_ENV !== "production",
+    reportUri: CSP_REPORT_PATH,
+  });
+
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(CSP_NONCE_HEADER, nonce);
+
+  /**
+   * The policy goes on the **request** headers as well as the response, and this
+   * is the line that makes nonce-based CSP work with App Router streaming.
+   *
+   * Next inspects the incoming `content-security-policy` for a nonce and, when
+   * it finds one, stamps that nonce onto the bootstrap and flight-data scripts
+   * it emits while streaming. Without it those scripts are un-nonced, the policy
+   * rejects them, and the page arrives as inert HTML — the exact failure the
+   * acceptance criterion asks to be demonstrated against.
+   */
+  requestHeaders.set("content-security-policy", policy);
+
+  const response = await handleRequest(request, requestHeaders);
+
+  response.headers.set("content-security-policy", policy);
+  const reportTo = buildReportToHeader(CSP_REPORT_PATH);
+  if (reportTo) response.headers.set("report-to", reportTo);
+
+  return response;
+}
+
+async function handleRequest(request: NextRequest, requestHeaders: Headers): Promise<NextResponse> {
   // `response` is rebuilt as cookies are set so refreshed tokens reach the browser.
-  let response = NextResponse.next({ request });
+  let response = NextResponse.next({ request: { headers: requestHeaders } });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -60,7 +116,10 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
         for (const { name, value } of cookiesToSet) {
           request.cookies.set(name, value);
         }
-        response = NextResponse.next({ request });
+        // Rebuilt with the same forwarded headers, so the nonce survives a
+        // session refresh. Dropping them here would leave the layout without a
+        // nonce on exactly the requests that renew a token.
+        response = NextResponse.next({ request: { headers: requestHeaders } });
         for (const { name, value, options } of cookiesToSet) {
           response.cookies.set(name, value, options);
         }

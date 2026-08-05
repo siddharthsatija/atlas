@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { requireVerifiedUser } from "@/server/auth/require-user";
+import { OnboardingService } from "@/server/onboarding/onboarding-service";
 import { setSidebarCollapsed } from "./actions";
 import {
   SIDEBAR_COLLAPSED_COOKIE,
@@ -36,7 +38,24 @@ import {
 export default async function ProductLayout({ children }: { children: ReactNode }) {
   // Throws a redirect when unauthenticated: nothing below runs, and no protected
   // markup is produced to flash.
-  await requireVerifiedUser();
+  const user = await requireVerifiedUser();
+
+  /**
+   * Onboarding gate (ATL-016).
+   *
+   * A user who has not finished setup is sent to `/onboarding` rather than shown
+   * an empty dashboard with no explanation of what Atlas does or does not do.
+   * ATL-015 anticipated this check — `profiles_onboarding_incomplete_idx` exists
+   * precisely because "the onboarding resume check runs on every product page
+   * load until it completes", and it is partial so completed profiles, the
+   * eventual majority, never pay for it.
+   *
+   * Placed immediately after the session check and before any product data is
+   * read, for the same reason the session check is first: a gate that later data
+   * fetching can drift above is not a gate.
+   */
+  const profile = await OnboardingService.create().start(user.id);
+  if (profile.onboardingCompletedAt === null) redirect("/onboarding");
 
   const store = await cookies();
   const sidebarCollapsed = parseSidebarCollapsed(store.get(SIDEBAR_COLLAPSED_COOKIE)?.value);

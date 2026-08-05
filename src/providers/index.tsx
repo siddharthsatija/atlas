@@ -11,9 +11,18 @@ import { MonitoringProvider } from "./monitoring-provider";
  * boundary that wraps the entire tree. Data providers do not belong — Atlas reads
  * protected data in Server Components (architecture §6, performance skill).
  */
-export function AppProviders({ children }: { children: ReactNode }) {
+export function AppProviders({
+  children,
+  nonce,
+}: {
+  children: ReactNode;
+  nonce?: string | undefined;
+}) {
   return (
-    <ThemeProvider>
+    /* `nonce` reaches next-themes, whose pre-paint inline script the CSP would
+       otherwise block (ATL-087). Threaded rather than read here because
+       `headers()` is server-only and these are client boundaries. */
+    <ThemeProvider {...(nonce ? { nonce } : {})}>
       {/* Registers the browser error sink (ATL-095). Renders nothing; placed
           outermost so a failure in any provider below is still reported. */}
       <MonitoringProvider />

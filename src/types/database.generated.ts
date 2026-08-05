@@ -9,6 +9,147 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      activity_events: {
+        Row: {
+          created_at: string
+          entity_id: string | null
+          entity_type: string | null
+          event_type: string
+          id: string
+          metadata_redacted_json: Json
+          occurred_at: string
+          summary: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          event_type: string
+          id?: string
+          metadata_redacted_json?: Json
+          occurred_at?: string
+          summary: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          event_type?: string
+          id?: string
+          metadata_redacted_json?: Json
+          occurred_at?: string
+          summary?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      audit_events: {
+        Row: {
+          actor_type: string
+          context_json: Json
+          created_at: string
+          entity_id: string | null
+          entity_type: string | null
+          event_hash: string
+          event_type: string
+          id: string
+          occurred_at: string
+          prev_hash: string
+          subject_ref: string
+        }
+        Insert: {
+          actor_type: string
+          context_json?: Json
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          event_hash: string
+          event_type: string
+          id?: string
+          occurred_at?: string
+          prev_hash: string
+          subject_ref: string
+        }
+        Update: {
+          actor_type?: string
+          context_json?: Json
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          event_hash?: string
+          event_type?: string
+          id?: string
+          occurred_at?: string
+          prev_hash?: string
+          subject_ref?: string
+        }
+        Relationships: []
+      }
+      consents: {
+        Row: {
+          consent_type: string
+          granted: boolean
+          id: string
+          policy_version: string
+          recorded_at: string
+          user_id: string
+        }
+        Insert: {
+          consent_type: string
+          granted: boolean
+          id?: string
+          policy_version: string
+          recorded_at?: string
+          user_id: string
+        }
+        Update: {
+          consent_type?: string
+          granted?: boolean
+          id?: string
+          policy_version?: string
+          recorded_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      idempotency_keys: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          idempotency_key: string
+          result_encrypted: string | null
+          result_hash: string | null
+          scope: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          idempotency_key: string
+          result_encrypted?: string | null
+          result_hash?: string | null
+          scope: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          idempotency_key?: string
+          result_encrypted?: string | null
+          result_hash?: string | null
+          scope?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -48,6 +189,39 @@ export type Database = {
           selected_categories?: string[]
           timezone?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      user_encryption_keys: {
+        Row: {
+          created_at: string
+          destroyed_at: string | null
+          id: string
+          kek_version: number
+          status: string
+          updated_at: string
+          user_id: string
+          wrapped_dek: string | null
+        }
+        Insert: {
+          created_at?: string
+          destroyed_at?: string | null
+          id?: string
+          kek_version: number
+          status?: string
+          updated_at?: string
+          user_id: string
+          wrapped_dek?: string | null
+        }
+        Update: {
+          created_at?: string
+          destroyed_at?: string | null
+          id?: string
+          kek_version?: number
+          status?: string
+          updated_at?: string
+          user_id?: string
+          wrapped_dek?: string | null
         }
         Relationships: []
       }

@@ -141,6 +141,35 @@ export default tseslint.config(
 
       /* --- Logging discipline (ATL-085: central redaction utility only) --- */
       "no-console": "error", // all console methods; use the redaction-aware logger
+
+      /**
+       * Direct telemetry transport is a lint failure (ATL-085 acceptance
+       * criteria).
+       *
+       * The central redaction utility is only a control if it cannot be walked
+       * around, and the way it gets walked around is not malice — it is a
+       * one-line `fetch` to an analytics endpoint that looks entirely reasonable
+       * in isolation and never passes through an allowlist. `src/lib/telemetry`
+       * is exempted below, because that is where the reviewed transport lives.
+       *
+       * Data-fetching `fetch` calls in server components are unaffected: this
+       * targets `navigator.sendBeacon` and `XMLHttpRequest`, which have no
+       * purpose in this codebase other than shipping telemetry, plus direct
+       * construction of an analytics client.
+       */
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "MemberExpression[object.name='navigator'][property.name='sendBeacon']",
+          message:
+            "Telemetry must route through src/lib/telemetry (ATL-085). sendBeacon bypasses redaction.",
+        },
+        {
+          selector: "NewExpression[callee.name='XMLHttpRequest']",
+          message:
+            "Telemetry must route through src/lib/telemetry (ATL-085). XMLHttpRequest bypasses redaction.",
+        },
+      ],
       "no-restricted-globals": [
         "error",
         {
@@ -183,10 +212,20 @@ export default tseslint.config(
     rules: { "@typescript-eslint/no-non-null-assertion": "off" },
   },
 
-  /* Instrumentation is allowed to reach the transport it wraps. */
+  /**
+   * The telemetry package owns the reviewed transport, so the restriction on
+   * direct transport use does not apply to it (ATL-085).
+   *
+   * `no-console` is deliberately NOT relaxed here. It was, before ATL-085, when
+   * the package-wide exemption was the only way the seam could emit anything.
+   * Now that a redaction-aware logger exists, a blanket exemption would let any
+   * telemetry module log an unredacted payload — which is precisely the leak
+   * this ticket closes. `logger.ts` carries two narrowly-scoped inline disables
+   * on its sink instead, where the exception is visible at the point it applies.
+   */
   {
     files: ["src/lib/telemetry/**/*.ts"],
-    rules: { "no-console": "off" },
+    rules: { "no-restricted-syntax": "off" },
   },
 
   prettier,

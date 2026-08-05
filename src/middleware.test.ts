@@ -235,6 +235,65 @@ describe("session lifetime enforcement (ATL-013)", () => {
   });
 });
 
+describe("security headers (ATL-087)", () => {
+  /**
+   * The policy must reach every response the middleware can produce, not just
+   * the happy path. The redirects are the ones worth pinning: they are what an
+   * unauthenticated or expired request receives, and a redirect without a
+   * policy is a page an injected script could run on.
+   */
+  it("sets a policy on a pass-through response", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "u-1" } } });
+    const response = await middleware(requestFor("/overview"));
+
+    expect(response.headers.get("content-security-policy")).toContain("script-src");
+  });
+
+  it("sets a policy on the sign-in redirect", async () => {
+    getUser.mockResolvedValue({ data: { user: null } });
+    const response = await middleware(requestFor("/overview"));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("content-security-policy")).toContain("script-src");
+  });
+
+  it("sets a policy on the session-expiry redirect", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "u-1" } } });
+    const longAgo = String(Date.now() - 400 * 24 * 60 * 60 * 1000);
+    const response = await middleware(
+      requestFor("/overview", {
+        "atlas.session.started": longAgo,
+        "atlas.session.seen": longAgo,
+      }),
+    );
+
+    expect(response.headers.get("content-security-policy")).toContain("script-src");
+  });
+
+  it("issues a different nonce per request", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "u-1" } } });
+
+    const first = await middleware(requestFor("/overview"));
+    const second = await middleware(requestFor("/overview"));
+
+    const nonceOf = (response: Response) =>
+      /'nonce-([^']+)'/.exec(response.headers.get("content-security-policy") ?? "")?.[1];
+
+    expect(nonceOf(first)).toBeDefined();
+    expect(nonceOf(first)).not.toBe(nonceOf(second));
+  });
+
+  it("names the violation report path", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "u-1" } } });
+    const response = await middleware(requestFor("/overview"));
+
+    expect(response.headers.get("content-security-policy")).toContain(
+      "report-uri /api/security/csp-report",
+    );
+    expect(response.headers.get("report-to")).toContain("csp-endpoint");
+  });
+});
+
 describe("matcher", () => {
   const matches = (pathname: string) =>
     config.matcher.some((pattern) => new RegExp(`^${pattern}$`).test(pathname));

@@ -17,6 +17,7 @@
  */
 
 import { buildErrorReport, type BuildErrorReportInput, type ErrorReport } from "./error-report";
+import { logger } from "./logger";
 
 export type ErrorSink = (report: ErrorReport) => void;
 
@@ -53,10 +54,21 @@ export function reportError(input: BuildErrorReportInput): ErrorReport {
     if (sink) {
       sink(report);
     } else if (process.env.NODE_ENV === "development") {
-      // Development visibility only, and it prints the REDACTED report — not the
+      // Development visibility only, and it emits the REDACTED report — not the
       // error. The raw error is already in the browser console via React's own
       // logging, where it is a local debugging artefact rather than telemetry.
-      console.error("[atlas:error-boundary]", report);
+      //
+      // Routed through the logger (ATL-085) rather than `console` directly: with
+      // no sink installed this is a logging path like any other, and a second
+      // console call here would be exactly the bypass the central utility exists
+      // to prevent.
+      logger.error("error-boundary.unreported", {
+        boundary: report.boundary,
+        route: report.route,
+        errorName: report.errorName,
+        ...(report.component ? { component: report.component } : {}),
+        ...(report.digest ? { digest: report.digest } : {}),
+      });
     }
   } catch {
     // A failing sink must not escalate a handled error into an unhandled one.

@@ -37,6 +37,15 @@ function renderSidebar(props: React.ComponentProps<typeof Sidebar> = {}) {
 const control = () => screen.getByRole("button", { name: /sidebar/i });
 const nav = () => screen.getByRole("navigation", { name: "Primary" });
 
+/**
+ * The sidebar container.
+ *
+ * Width and collapse state belong to the whole column — the wordmark and profile
+ * shrink with it too — so they live here rather than on the `navigation`
+ * landmark, which wraps the destination lists alone.
+ */
+const sidebar = () => screen.getByTestId("sidebar");
+
 beforeEach(() => {
   mockPathname.value = "/assets";
 });
@@ -121,14 +130,14 @@ describe("expanded and collapsed layout", () => {
     renderSidebar();
 
     // §3: expanded 240–264px (w-64 = 256), rail 72–80px (w-20 = 80).
-    expect(nav()).toHaveClass("lg:w-64");
-    expect(nav()).not.toHaveAttribute("data-collapsed");
+    expect(sidebar()).toHaveClass("lg:w-64");
+    expect(sidebar()).not.toHaveAttribute("data-collapsed");
 
     await user.click(control());
 
-    expect(nav()).toHaveClass("w-20");
-    expect(nav()).not.toHaveClass("lg:w-64");
-    expect(nav()).toHaveAttribute("data-collapsed", "true");
+    expect(sidebar()).toHaveClass("w-20");
+    expect(sidebar()).not.toHaveClass("lg:w-64");
+    expect(sidebar()).toHaveAttribute("data-collapsed", "true");
   });
 
   it("keeps every destination reachable when collapsed", () => {
@@ -242,7 +251,7 @@ describe("persistence", () => {
   it("starts from the server-resolved preference", () => {
     // No client-side restore, so there is no expanded-then-collapsed flash.
     renderSidebar({ defaultCollapsed: true });
-    expect(nav()).toHaveAttribute("data-collapsed", "true");
+    expect(sidebar()).toHaveAttribute("data-collapsed", "true");
     expect(control()).toHaveAccessibleName("Expand sidebar");
   });
 
@@ -251,7 +260,7 @@ describe("persistence", () => {
     renderSidebar();
 
     await user.click(control());
-    expect(nav()).toHaveAttribute("data-collapsed", "true");
+    expect(sidebar()).toHaveAttribute("data-collapsed", "true");
   });
 
   it("does not block the interaction on a slow write", async () => {
@@ -261,7 +270,7 @@ describe("persistence", () => {
     renderSidebar({ onCollapsedChange });
 
     await user.click(control());
-    expect(nav()).toHaveAttribute("data-collapsed", "true");
+    expect(sidebar()).toHaveAttribute("data-collapsed", "true");
   });
 });
 

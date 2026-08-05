@@ -72,6 +72,24 @@ Restricted data receives the strongest controls. Restricted text fields stored i
 - Rate-limit login and verification attempts.
 - Do not reveal whether an email address is registered.
 
+#### Chosen rate limits (ATL-086)
+
+| Surface                          | Limit             | Keys                     |
+| -------------------------------- | ----------------- | ------------------------ |
+| Magic-link request               | 5 per 15 minutes  | client address, email    |
+| Magic-link / OAuth callback      | 10 per 15 minutes | client address           |
+| Client error ingest (ATL-095)    | 60 per minute     | client address           |
+
+Values are defaults, overridable per environment. §5 mandates that login and verification be limited but specifies no numbers; five links per fifteen minutes leaves a user who mistypes an address or loses an email room to retry while making inbox bombing and enumeration expensive.
+
+**Dual keying.** Sign-in counts against the caller's address *and* the requested email, because each catches an attack the other misses: one host spraying many addresses trips the address key, a distributed attempt bombing one inbox trips the email key.
+
+**Identifiers are pseudonymous.** Counter keys are HMACs under `AUDIT_HMAC_KEY`, the same construction ADR-006 uses for audit subjects. The counter store is a third-party service and an IP address is personal data, so it never holds a readable list of visitor addresses. Counters need only a stable opaque key, so this costs nothing.
+
+**Refusal is indistinguishable.** A limited sign-in returns the same neutral `rate_limited` result regardless of whether the address is registered — a limit that behaved differently for known addresses would be the enumeration oracle this section forbids.
+
+**Store outage: fail open, loudly.** When the counter store is unreachable the request is allowed and an error-level event is logged. Failing closed would let an attacker degrade one dependency and take authentication down entirely — a cheaper denial of service than the abuse rate limiting defends against. The alert is what bounds the window of missing protection, so it is part of the control rather than decoration.
+
 ### Session management
 
 - Show active sessions where provider support allows.
@@ -252,7 +270,7 @@ Events recorded (via a single emitter so activity and audit cannot drift):
 - Export requests, downloads, and expiries
 - Account deletion initiation and completion; DEK creation and destruction
 - Request state transitions
-- Consent changes
+- Consent changes — emitted by the consent service (ATL-078) as `consent.granted` / `consent.revoked`, carrying the consent type and policy version only
 - Sensitive-value reveal actions
 - Administrative elevation
 - Policy, score, and prompt versions used
@@ -355,9 +373,10 @@ Controls:
 
 Controls:
 
-- Central redaction utility
-- allowlisted telemetry fields
-- tests for log payloads
+- Central redaction utility — `src/lib/telemetry/redaction.ts` (ATL-085); handles nested payloads and scrubs emails, phone numbers, and credentials from surviving strings
+- allowlisted telemetry fields — policies in `logger.ts` (architecture §16 capture list) and `monitoring-event.ts`; unknown keys are dropped and counted
+- single logging entry point — `logger.ts`, with no free-text message parameter; `no-console` and a restricted-syntax rule make direct `console` or transport use a lint failure
+- tests for log payloads — table-driven unit tests including nested payloads, plus a lint rule test that runs ESLint over fixture source rather than only asserting the config
 - production logging review
 
 ### T5: Malicious or misleading AI output
@@ -413,6 +432,20 @@ At minimum:
 - Secure cookie attributes
 
 CSP should avoid unsafe inline scripts wherever practical.
+
+### Implementation (ATL-087)
+
+Every header except CSP is a fixed string in `next.config.ts`. **CSP is built per request in `src/middleware.ts`** because a nonce-based policy needs fresh entropy per response; the policy itself is in `src/lib/security/content-security-policy.ts`.
+
+- **`script-src` is strictly nonce-based** — `'self' 'nonce-…' 'strict-dynamic'`, with no `'unsafe-inline'` in any environment and `'unsafe-eval'` only in development, where React Refresh requires it.
+- **`style-src` retains `'unsafe-inline'`**, and it is the only directive that does. §18 scopes the requirement to inline *scripts*; Next injects un-nonced inline `<style>` while streaming, so a strict `style-src` renders production unstyled. A browser that honours the nonce ignores the fallback.
+- **The policy is set on the request headers as well as the response.** That is what makes nonce-based CSP work with App Router streaming: Next reads the incoming policy and stamps its nonce onto the bootstrap and flight-data scripts it emits. Library-rendered inline scripts are *not* covered by that mechanism — `next-themes` needs the nonce passed explicitly, which the root layout does.
+- **`frame-ancestors 'none'`** is the §18 framing restriction. `X-Frame-Options: DENY` remains in `next.config.ts` for browsers predating the directive.
+- **Applied to every response**, including the sign-in and session-expiry redirects. A redirect without a policy is a page an injected script could run on.
+
+**Violation reports** post to `/api/security/csp-report`. The report is neither stored nor forwarded: it arrives unauthenticated and contains `document-uri`, `referrer`, and `blocked-uri`, all of which are attacker-influenceable URLs that can carry personal data. Only the violated directive — a fixed CSP vocabulary — and a count are recorded, through the ATL-085 logger whose allowlist drops everything else. The endpoint is rate-limited (ATL-086) and always answers 204, for the same probing-oracle reason as the ATL-095 ingest.
+
+**Secure cookie attributes** are set by three builders — `session-lifetime.ts`, `return-path.ts`, and `sidebar-preference.ts` — each `httpOnly`, `sameSite`, and `secure` outside local development. `src/test/security-headers.test.ts` fails if a fourth cookie builder appears without the same attributes.
 
 ## 19. Application security requirements
 

@@ -14,7 +14,17 @@ function PageContainer({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="page-container"
-      className={cn("mx-auto w-full max-w-[--container-content] px-4 sm:px-6 lg:px-8", className)}
+      /**
+       * `max-w-(--container-content)`, with parentheses.
+       *
+       * Tailwind v3 auto-wrapped a bracketed value starting with `--` in
+       * `var()`. v4 does not: `max-w-[--container-content]` compiles to the
+       * literal `max-width: --container-content`, which is invalid CSS, so the
+       * browser drops the declaration and the container grows unbounded. It fails
+       * silently — the class is present in the markup and a rule is present in the
+       * stylesheet, so nothing looks wrong until you measure the box.
+       */
+      className={cn("mx-auto w-full max-w-(--container-content) px-4 sm:px-6 lg:px-8", className)}
       {...props}
     />
   );

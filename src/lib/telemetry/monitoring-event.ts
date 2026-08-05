@@ -14,14 +14,16 @@
  * they enter *after* the point ATL-010 guarantees. Redaction therefore runs where
  * the data actually leaves the process, not where it was first shaped.
  *
- * Relationship to ATL-085: that ticket delivers the general allowlist redaction
- * utility used by every logging path. This module is the narrow, monitoring-shaped
- * instance of the same rule, built now because ATL-095 cannot ship without it.
- * When ATL-085 lands, `redactMonitoringEvent` should delegate to it rather than
- * keeping a second pattern list.
+ * Relationship to ATL-085: that ticket delivered the general allowlist redaction
+ * utility used by every logging path, and `redactMonitoringEvent` now **delegates
+ * to it** rather than keeping a second implementation. What stays here is the
+ * monitoring-specific part that cannot be generic: the per-field shape validators
+ * below. The traversal, the drop and redaction counting, and the restricted-pattern
+ * scrub all live in `redaction.ts` and are shared with every other logging path.
  */
 
 import type { ErrorReport } from "./error-report";
+import { redact, scalar, type FieldPolicy } from "./redaction";
 
 /** Bumped when the wire shape changes, so a collector can reject what it cannot parse. */
 export const MONITORING_SCHEMA_VERSION = 1;
@@ -163,43 +165,29 @@ export interface RedactionOutcome {
 }
 
 /**
+ * The monitoring policy, expressed in the shared utility's vocabulary.
+ *
+ * Derived from `FIELD_VALIDATORS` rather than restated, so the validators stay
+ * the single source of truth for what each field may contain.
+ */
+export const MONITORING_FIELD_POLICY: FieldPolicy = Object.fromEntries(
+  Object.entries(FIELD_VALIDATORS).map(([key, validate]) => [key, scalar(validate)]),
+);
+
+/**
  * The last thing that runs before an event reaches the network.
  *
- * Returns a new object containing only allowlisted keys whose values pass both
- * their shape check and the restricted-pattern scan. Counts are returned rather
- * than logged so the caller decides what to do with them — and so tests can assert
- * that redaction actually fired rather than inferring it from absence.
+ * Delegates to the central utility (ATL-085), which applies the policy above,
+ * counts what it removes, and additionally scrubs restricted patterns from
+ * surviving strings. Counts are returned rather than logged so the caller decides
+ * what to do with them — and so tests can assert that redaction actually fired
+ * rather than inferring it from absence.
  */
 export function redactMonitoringEvent(candidate: unknown): RedactionOutcome {
-  const droppedKeys: string[] = [];
-  const redactedKeys: string[] = [];
+  const { value, droppedKeys, redactedKeys } = redact<MonitoringEvent>(
+    candidate,
+    MONITORING_FIELD_POLICY,
+  );
 
-  const source: Record<string, unknown> =
-    typeof candidate === "object" && candidate !== null
-      ? (candidate as Record<string, unknown>)
-      : {};
-
-  const out: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(source)) {
-    const validator = FIELD_VALIDATORS[key];
-
-    // Not an allowlisted key — dropped whatever its value.
-    if (!validator) {
-      droppedKeys.push(key);
-      continue;
-    }
-
-    // Allowlisted, but the value does not have the shape the field promises.
-    // Removed rather than coerced: a value we cannot recognise is one we cannot
-    // vouch for, and a half-repaired identifier is still a correlation handle.
-    if (!validator(value)) {
-      redactedKeys.push(key);
-      continue;
-    }
-
-    out[key] = value;
-  }
-
-  return { event: out as unknown as MonitoringEvent, droppedKeys, redactedKeys };
+  return { event: value, droppedKeys, redactedKeys };
 }

@@ -320,6 +320,54 @@ describe("environment isolation", () => {
     });
   });
 
+  describe("R13 the previous KEK must be a complete, distinct, earlier generation", () => {
+    const PREVIOUS = Buffer.alloc(32, 5).toString("base64");
+
+    it("accepts neither value — the normal steady state", () => {
+      // A previous KEK exists only during a rotation sweep.
+      expect(findIsolationViolations(env())).toEqual([]);
+    });
+
+    it("accepts a complete, distinct, earlier pair", () => {
+      const e = env({
+        ATLAS_KEK_VERSION: 2,
+        ATLAS_KEK_PREVIOUS: PREVIOUS,
+        ATLAS_KEK_PREVIOUS_VERSION: 1,
+      });
+      expect(findIsolationViolations(e)).toEqual([]);
+    });
+
+    it.each([
+      ["only the key", { ATLAS_KEK_PREVIOUS: PREVIOUS }],
+      ["only the version", { ATLAS_KEK_PREVIOUS_VERSION: 1 }],
+    ])("rejects %s", (_label, overrides) => {
+      // Either half alone silently disables the rotation fallback.
+      expect(rules(env(overrides))).toContain("previous-kek-requires-both-key-and-version");
+    });
+
+    it("rejects a previous KEK identical to the current one", () => {
+      // A rotation that reuses the key rotates nothing but reports success.
+      const e = env({
+        ATLAS_KEK_VERSION: 2,
+        ATLAS_KEK_PREVIOUS: KEK,
+        ATLAS_KEK_PREVIOUS_VERSION: 1,
+      });
+      expect(rules(e)).toContain("previous-kek-must-differ-from-current");
+    });
+
+    it.each([
+      ["equal versions", 2, 2],
+      ["a version that moves backwards", 1, 2],
+    ])("rejects %s", (_label, current, previous) => {
+      const e = env({
+        ATLAS_KEK_VERSION: current,
+        ATLAS_KEK_PREVIOUS: PREVIOUS,
+        ATLAS_KEK_PREVIOUS_VERSION: previous,
+      });
+      expect(rules(e)).toContain("kek-version-must-advance");
+    });
+  });
+
   describe("assertEnvironmentIsolation", () => {
     it("does not throw for a sound environment", () => {
       expect(() => assertEnvironmentIsolation(env())).not.toThrow();

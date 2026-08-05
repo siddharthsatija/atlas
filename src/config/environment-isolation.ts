@@ -264,6 +264,48 @@ export function findIsolationViolations(env: ServerEnv): IsolationViolation[] {
     }
   }
 
+  // --- R13: the previous KEK must be configured as a complete pair ---------
+  // ATL-084. A key without its version cannot be selected, and a version without
+  // its key resolves to nothing — either half alone silently disables the
+  // rotation fallback it exists to provide, and users mid-sweep lose access to
+  // their own data.
+  const hasPreviousKek = Boolean(env.ATLAS_KEK_PREVIOUS);
+  const hasPreviousVersion = env.ATLAS_KEK_PREVIOUS_VERSION !== undefined;
+  if (hasPreviousKek !== hasPreviousVersion) {
+    violations.push({
+      rule: "previous-kek-requires-both-key-and-version",
+      variables: ["ATLAS_KEK_PREVIOUS", "ATLAS_KEK_PREVIOUS_VERSION"],
+      message:
+        "The previous KEK is half-configured. Set both the key and its version, or neither (ADR-003 rotation).",
+      severity: "error",
+    });
+  }
+
+  if (hasPreviousKek && hasPreviousVersion) {
+    // Reusing one key across generations makes rotation a no-op that reports
+    // success — the worst possible outcome for a control whose value is that the
+    // old key stops working.
+    if (env.ATLAS_KEK_PREVIOUS === env.ATLAS_KEK) {
+      violations.push({
+        rule: "previous-kek-must-differ-from-current",
+        variables: ["ATLAS_KEK_PREVIOUS", "ATLAS_KEK"],
+        message:
+          "ATLAS_KEK_PREVIOUS is identical to ATLAS_KEK. A rotation that reuses the key rotates nothing (ADR-003).",
+        severity: "error",
+      });
+    }
+
+    if ((env.ATLAS_KEK_PREVIOUS_VERSION ?? 0) >= env.ATLAS_KEK_VERSION) {
+      violations.push({
+        rule: "kek-version-must-advance",
+        variables: ["ATLAS_KEK_PREVIOUS_VERSION", "ATLAS_KEK_VERSION"],
+        message:
+          "ATLAS_KEK_VERSION must be greater than ATLAS_KEK_PREVIOUS_VERSION. Versions identify generations and only move forward (ADR-003).",
+        severity: "error",
+      });
+    }
+  }
+
   // --- R11: Google OAuth must be configured as a pair ----------------------
   // ATL-011. Google is optional, but half-configured is not a valid state: a
   // client ID with no secret produces a provider that appears available and fails

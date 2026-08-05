@@ -3,12 +3,23 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
 /**
- * Two projects, matching the test strategy in docs/02-technical-architecture.md §17:
+ * Three projects, split by **what each needs to run**, not by what it is called.
  *
- *   unit        — pure functions, schemas, redaction, rules, score, state machine.
- *                 No database. Must stay in the millisecond range.
- *   integration — services, repositories, RLS, jobs. Requires a local Supabase
- *                 instance (`pnpm db:start`) and runs serially.
+ *   unit     — jsdom. Pure functions, schemas, components. No database.
+ *   server   — node. Modules marked `server-only`, exercised against test
+ *              doubles. No database.
+ *   database — node. RLS and authorization against a real Postgres. Requires
+ *              `pnpm db:start`, and runs serially against shared state.
+ *
+ * The `server` project was previously merged into `integration`, which conflated
+ * "runs in node" with "needs a database". That conflation is what made the CI
+ * unit job — which runs every project by default — try to open a database
+ * connection and fail. Most node-environment tests here mock their client and
+ * need no Postgres at all; only `tests/integration/**` genuinely does.
+ *
+ * Splitting them means the fast, no-infrastructure gate can cover both `unit`
+ * and `server` — preserving the coverage denominator — while the database suite
+ * stays behind the job that actually starts Postgres.
  *
  * End-to-end and accessibility journeys run in Playwright, not here.
  */
@@ -50,8 +61,8 @@ export default defineConfig({
          * selects — by absolute path, because that subpath is not listed in the
          * package's `exports` map and cannot be requested by specifier.
          *
-         * Scoped to this project only. The unit project keeps the real guard, so an
-         * accidental client import of a server module still fails there.
+         * Scoped to the node projects. The unit project keeps the real guard, so
+         * an accidental client import of a server module still fails there.
          */
         resolve: {
           alias: {
@@ -62,9 +73,30 @@ export default defineConfig({
           conditions: ["react-server", "node"],
         },
         test: {
-          name: "integration",
+          name: "server",
           environment: "node",
-          include: ["src/**/*.integration.test.ts", "tests/integration/**/*.test.ts"],
+          // Server modules against test doubles. No database, so these run in
+          // the same fast gate as the unit project.
+          include: ["src/**/*.integration.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        // Same server-only resolution as above: these also load server modules.
+        resolve: {
+          alias: {
+            "server-only": fileURLToPath(
+              new URL("./node_modules/server-only/empty.js", import.meta.url),
+            ),
+          },
+          conditions: ["react-server", "node"],
+        },
+        test: {
+          name: "database",
+          environment: "node",
+          // The only suites that require Postgres. They create real users and
+          // assert RLS, so they must not run without `pnpm db:start`.
+          include: ["tests/integration/**/*.test.ts"],
           // Shared database state: never run these in parallel.
           fileParallelism: false,
           testTimeout: 30_000,

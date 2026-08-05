@@ -26,7 +26,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Unit tests with coverage thresholds
+      # Runs the `unit` and `server` projects only. Both are infrastructure-free:
+      # the `database` project is the sole suite that needs Postgres, and it runs
+      # in the integration job below where one is actually started.
+      - name: Unit and server tests with coverage thresholds
         run: pnpm test:coverage
 
   integration:
@@ -69,7 +72,10 @@ jobs:
       - name: Start local Supabase
         run: pnpm db:start
 
-      - name: Integration tests
+      - name: Export local Supabase credentials
+        run: ./.github/scripts/export-supabase-env.sh
+
+      - name: Database integration tests
         run: pnpm test:integration
 
       - name: Stop Supabase
@@ -88,15 +94,31 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+
+      # A real local Supabase, not placeholders.
+      #
+      # The previous configuration pointed the app at 127.0.0.1:54321 with fake
+      # keys and started nothing there. Since ATL-012 the middleware verifies
+      # every product route against Supabase and fails closed when it cannot
+      # reach it, so every `/overview` navigation redirected to `/sign-in` and
+      # the shell specs had nothing to assert against. Placeholder credentials
+      # stopped being viable the moment routes became protected.
+      - name: Start local Supabase
+        run: pnpm db:start
+
+      - name: Export local Supabase credentials
+        run: ./.github/scripts/export-supabase-env.sh
+
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
+
       - name: Run Playwright
         run: pnpm test:e2e
         env:
-          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          # Supabase URL and keys come from GITHUB_ENV above. The rest are
+          # non-secret local fixtures the app needs to boot; they unlock nothing
+          # and reach no hosted service.
           NEXT_PUBLIC_APP_URL: http://localhost:3000
-          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
           ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
           ATLAS_KEK_VERSION: "1"
           AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
@@ -104,6 +126,10 @@ jobs:
           RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
           RATE_LIMIT_REDIS_TOKEN: ci-placeholder
           ATLAS_ENV: preview
+
+      - name: Stop Supabase
+        if: always()
+        run: pnpm db:stop
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

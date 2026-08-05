@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { STORAGE_STATE } from "./tests/auth-state";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 
@@ -35,12 +36,38 @@ export default defineConfig({
   },
 
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile", use: { ...devices["Pixel 7"] } },
+    /**
+     * Signs in once through the real flow and saves the session (ATL-012).
+     *
+     * Product routes require a verified server-side session, so every browser
+     * project depends on this. It runs one magic-link round trip per suite
+     * rather than one per spec — the link is single-use, and re-issuing it for
+     * every test would both slow the run and hit the auth rate limit.
+     *
+     * `testMatch` is overridden because the top-level pattern only picks up
+     * `*.spec.ts`.
+     */
+    { name: "setup", testMatch: /auth\.setup\.ts$/ },
+
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], storageState: STORAGE_STATE },
+      dependencies: ["setup"],
+    },
+    {
+      name: "mobile",
+      use: { ...devices["Pixel 7"], storageState: STORAGE_STATE },
+      dependencies: ["setup"],
+    },
     {
       // Smallest supported viewport per frontend spec §21 / accessibility checklist.
       name: "small-viewport",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 320, height: 720 } },
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 320, height: 720 },
+        storageState: STORAGE_STATE,
+      },
+      dependencies: ["setup"],
     },
   ],
 

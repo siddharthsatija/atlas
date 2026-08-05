@@ -8,11 +8,8 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { MAGIC_LINK_MESSAGES, SIGN_IN_METHOD_NOTE, type AuthMessage } from "@/lib/auth/auth-copy";
 import { RETURN_PATH_PARAM } from "@/lib/auth/return-path";
-import {
-  INITIAL_MAGIC_LINK_STATE,
-  requestMagicLinkAction,
-  startGoogleSignInAction,
-} from "./actions";
+import { requestMagicLinkAction, startGoogleSignInAction } from "./actions";
+import { INITIAL_MAGIC_LINK_STATE } from "./form-state";
 
 /**
  * Sign-in form (ATL-014).
