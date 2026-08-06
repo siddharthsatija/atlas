@@ -32,6 +32,24 @@ async function startOnboarding(page: Page): Promise<void> {
 
 const step = (page: Page, name: string | RegExp) => page.getByRole("heading", { level: 1, name });
 
+/**
+ * Performs an action and waits for the progress save it triggers (ATL-017).
+ *
+ * The save is fire-and-forget by design — stepping forward must not wait on a
+ * round trip — so a test that reloads immediately after clicking would race it.
+ * Waiting on the Server Action's own response makes the sequence deterministic
+ * rather than papering over the race with a timeout.
+ */
+async function actAndAwaitSave(page: Page, act: () => Promise<void>): Promise<void> {
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && response.url().includes("/onboarding"),
+    ),
+    act(),
+  ]);
+}
+
 test.describe("the flow", () => {
   test("walks all five steps and lands on the dashboard", async ({ page }) => {
     await startOnboarding(page);
@@ -102,6 +120,55 @@ test.describe("the flow", () => {
     // Nothing is asked there, and it carries the limitations copy.
     await startOnboarding(page);
     await expect(page.getByRole("button", { name: "Skip" })).toHaveCount(0);
+  });
+});
+
+test.describe("resuming (ATL-017)", () => {
+  test("returns to the saved step with prior choices intact after a refresh", async ({ page }) => {
+    /**
+     * The acceptance criterion, asserted the way a user would meet it: leave
+     * mid-setup, come back, and find your place. Only a real browser can test
+     * this — the state has to survive an actual page load.
+     */
+    await startOnboarding(page);
+
+    await actAndAwaitSave(page, () => page.getByRole("button", { name: "Continue" }).click());
+    await expect(step(page, "What brings you here?")).toBeVisible();
+
+    await actAndAwaitSave(page, () =>
+      page.getByRole("radio", { name: /Reduce my exposure/ }).check(),
+    );
+    await actAndAwaitSave(page, () => page.getByRole("button", { name: "Continue" }).click());
+    await expect(step(page, "Where do you have accounts?")).toBeVisible();
+
+    await page.reload();
+
+    // The step survives the reload.
+    await expect(step(page, "Where do you have accounts?")).toBeVisible();
+
+    // And so does the answer given before it.
+    await page.getByRole("button", { name: "Back" }).click();
+    await expect(page.getByRole("radio", { name: /Reduce my exposure/ })).toBeChecked();
+  });
+
+  test("asks for AI consent again rather than restoring a tick", async ({ page }) => {
+    /**
+     * Progress is resumed; consent is not. A box found already checked would be
+     * agreement the user never gave on this visit (ATL-016, ATL-078).
+     */
+    await startOnboarding(page);
+
+    await actAndAwaitSave(page, () => page.getByRole("button", { name: "Continue" }).click());
+    for (let i = 0; i < 3; i++) {
+      await actAndAwaitSave(page, () => page.getByRole("button", { name: "Skip" }).click());
+    }
+
+    await expect(step(page, "You are set up")).toBeVisible();
+    await page.getByRole("checkbox", { name: /Let Atlas use AI/ }).check();
+
+    await page.reload();
+
+    await expect(page.getByRole("checkbox", { name: /Let Atlas use AI/ })).not.toBeChecked();
   });
 });
 

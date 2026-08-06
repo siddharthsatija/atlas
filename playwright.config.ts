@@ -71,10 +71,33 @@ export default defineConfig({
     },
   ],
 
+  /**
+   * The suite runs against a production build, always.
+   *
+   * `reuseExistingServer` used to be on locally, and a `pnpm dev` server left
+   * running on the same port was silently adopted as the target. That is a
+   * different runtime, not a convenience: `next dev` compiles each route on
+   * first request, so `page.goto` waits on a webpack build rather than a
+   * response, and navigations that take milliseconds under `next start` ran
+   * past the 30-second test timeout. It also injects the dev overlay, whose
+   * permanently-present empty `role="alert"` region is invisible to a human and
+   * poisonous to any role-based assertion.
+   *
+   * Reusing a server on this port cannot be made safe, because the port is not
+   * ours to disambiguate: `supabase/config.toml` pins `site_url` and the
+   * callback allowlist to :3000, so the E2E harness cannot move elsewhere
+   * without changing auth configuration. Starting our own build is the only
+   * option that guarantees what is under test. If the port is occupied,
+   * `next start` fails loudly — which is the correct outcome, and far better
+   * than a green run against something else.
+   *
+   * The cost is a build per local run, and it is deliberate: nothing here is
+   * allowed to be faster by testing something other than what ships.
+   */
   webServer: {
     command: "pnpm build && pnpm start",
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 180_000,
   },
 });

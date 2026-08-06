@@ -87,6 +87,7 @@ Run relevant end-to-end and security tests for changed features.
 - Use transactions for multi-record state transitions.
 - Every status change writes an audit-safe event.
 - No production data in seeds or tests.
+- `src/types/database.generated.ts` is generated output. Never hand-edit it. After every migration, regenerate it with `pnpm db:reset && pnpm db:types`. If the generated result differs from what the code expects, the code is wrong — change the code, not the generated file.
 
 ## Definition of done
 

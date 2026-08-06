@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { ASSET_CATEGORIES } from "@/lib/assets/categories";
+import { INITIAL_ONBOARDING_STATE, type OnboardingState } from "@/lib/onboarding/onboarding-state";
 import {
   PRIVACY_GOALS,
   STARTING_POINTS,
@@ -30,13 +31,18 @@ import { cn } from "@/lib/utils";
  * between steps must not cost a round trip, and the back button should return to
  * the previous *step* rather than the previous page.
  *
- * ## State lives here, deliberately
+ * ## State lives here, and is mirrored to storage
  *
- * Choices are held in component state and submitted once, at the end. Persisting
- * step progress to `profiles.onboarding_state_json` is **ATL-017** — this
- * component's shape (a step id plus a small answers object) is what that ticket
- * will lift into storage, which is why the answers are a flat object of scalars
- * rather than anything harder to serialise.
+ * Choices are held in component state and submitted once, at the end. **ATL-017**
+ * additionally mirrors the step and the answers to
+ * `profiles.onboarding_state_json` as the user moves, so a refresh or a return
+ * the next day resumes where they left off.
+ *
+ * The mirror is one-way and best-effort: this component remains the source of
+ * truth for the session, and a failed save costs the user their saved position,
+ * never their current one. `aiConsent` is the one field that is never mirrored —
+ * see `onboarding-state.ts` for why restoring a ticked consent box would be
+ * worse than asking again.
  *
  * ## Nothing sensitive is collected
  *
@@ -52,24 +58,89 @@ interface Answers {
   aiConsent: boolean;
 }
 
-const INITIAL_ANSWERS: Answers = {
-  privacyGoal: null,
-  categories: [],
-  startingPoint: null,
-  aiConsent: false,
-};
+export interface OnboardingFlowProps {
+  /**
+   * Progress restored from `profiles.onboarding_state_json` (ATL-017).
+   *
+   * Server-resolved rather than fetched after mount, so a returning user sees
+   * their step immediately instead of the introduction flashing past — the same
+   * reasoning as ATL-006's server-resolved sidebar state.
+   */
+  initialState?: OnboardingState;
+  /**
+   * Persists progress. Injected rather than imported so this component stays
+   * testable with a plain spy, matching the ATL-006 sidebar contract.
+   *
+   * Optional: the flow is fully usable without it, the position simply does not
+   * survive a refresh.
+   */
+  onStateChange?: (state: OnboardingState) => void | Promise<void>;
+}
 
-export function OnboardingFlow() {
-  const [step, setStep] = useState<OnboardingStep>("introduction");
-  const [answers, setAnswers] = useState<Answers>(INITIAL_ANSWERS);
+export function OnboardingFlow({ initialState, onStateChange }: OnboardingFlowProps = {}) {
+  const resumed = initialState ?? INITIAL_ONBOARDING_STATE;
+
+  const [step, setStep] = useState<OnboardingStep>(resumed.step);
+  const [answers, setAnswers] = useState<Answers>({
+    privacyGoal: resumed.privacyGoal,
+    categories: resumed.categories,
+    startingPoint: resumed.startingPoint,
+    // Never restored. ATL-016 requires this box to be unchecked and never
+    // pre-selected, so consent is asked fresh on every return.
+    aiConsent: false,
+  });
   const [state, submit, pending] = useActionState(completeOnboardingAction, INITIAL_COMPLETE_STATE);
+  const [, startSaveTransition] = useTransition();
 
   const back = previousStep(step);
+
+  /**
+   * Applies a step + answers change locally, then persists it.
+   *
+   * Fire-and-forget inside a transition: the step change renders immediately and
+   * the save follows. A user pressing Continue is telling us where they want to
+   * be, not asking permission to go there.
+   */
+  const persist = (nextState: OnboardingState) => {
+    startSaveTransition(() => {
+      void onStateChange?.(nextState);
+    });
+  };
+
+  const goToStep = (next: OnboardingStep) => {
+    setStep(next);
+    persist({
+      step: next,
+      privacyGoal: answers.privacyGoal,
+      categories: answers.categories,
+      startingPoint: answers.startingPoint,
+    });
+  };
+
+  /**
+   * Records an answer and saves it against the step the user is on.
+   *
+   * The next value is computed from the current one *outside* `setAnswers`
+   * rather than in an updater callback. An updater runs during the render pass,
+   * and starting a transition from there is a React violation — the same trap
+   * ATL-006 hit with the sidebar. Every caller here is a discrete user event, so
+   * the closed-over value is current.
+   */
+  const answer = (change: Partial<Answers>) => {
+    const updated = { ...answers, ...change };
+    setAnswers(updated);
+    persist({
+      step,
+      privacyGoal: updated.privacyGoal,
+      categories: updated.categories,
+      startingPoint: updated.startingPoint,
+    });
+  };
 
   /** Advances, or does nothing on the last step where the form takes over. */
   const advance = () => {
     const next = nextStep(step);
-    if (next) setStep(next);
+    if (next) goToStep(next);
   };
 
   return (
@@ -83,7 +154,7 @@ export function OnboardingFlow() {
             copy={ONBOARDING_STEP_COPY.privacy_goal}
             options={PRIVACY_GOALS}
             selected={answers.privacyGoal ? [answers.privacyGoal] : []}
-            onSelect={(id) => setAnswers((a) => ({ ...a, privacyGoal: id }))}
+            onSelect={(id) => answer({ privacyGoal: id })}
           />
         )}
         {step === "categories" && (
@@ -93,12 +164,11 @@ export function OnboardingFlow() {
             multiple
             selected={answers.categories}
             onSelect={(id) =>
-              setAnswers((a) => ({
-                ...a,
-                categories: a.categories.includes(id)
-                  ? a.categories.filter((c) => c !== id)
-                  : [...a.categories, id],
-              }))
+              answer({
+                categories: answers.categories.includes(id)
+                  ? answers.categories.filter((c) => c !== id)
+                  : [...answers.categories, id],
+              })
             }
           />
         )}
@@ -107,13 +177,13 @@ export function OnboardingFlow() {
             copy={ONBOARDING_STEP_COPY.starting_point}
             options={STARTING_POINTS}
             selected={answers.startingPoint ? [answers.startingPoint] : []}
-            onSelect={(id) => setAnswers((a) => ({ ...a, startingPoint: id }))}
+            onSelect={(id) => answer({ startingPoint: id })}
           />
         )}
         {step === "ready" && (
           <ReadyStep
             answers={answers}
-            onConsentChange={(aiConsent) => setAnswers((a) => ({ ...a, aiConsent }))}
+            onConsentChange={(aiConsent) => setAnswers({ ...answers, aiConsent })}
             submit={submit}
             pending={pending}
             failed={state.error !== null}
@@ -127,7 +197,7 @@ export function OnboardingFlow() {
         <div className="mt-6 flex items-center justify-between gap-3">
           <div>
             {back && (
-              <Button variant="tertiary" onClick={() => setStep(back)}>
+              <Button variant="tertiary" onClick={() => goToStep(back)}>
                 Back
               </Button>
             )}

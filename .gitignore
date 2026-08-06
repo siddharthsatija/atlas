@@ -18,8 +18,10 @@ dist/
 
 # Testing
 coverage/
-playwright-report/
-test-results/
+# Playwright output. The suffixed variants come from per-project isolated runs
+# (`--output`/`--reporter` overrides), which the ATL-033 debugging pass relied on.
+playwright-report*/
+test-results*/
 blob-report/
 .playwright/
 

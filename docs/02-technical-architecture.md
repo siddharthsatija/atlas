@@ -177,7 +177,7 @@ All identifiers use UUIDs. All tables include `created_at` and `updated_at` unle
 - `timezone`
 - `locale`
 - `onboarding_completed_at`
-- `onboarding_state_json`: saved step progress for resumable onboarding (step, choices; no sensitive values)
+- `onboarding_state_json`: saved step progress for resumable onboarding (step, choices; no sensitive values). ATL-017 defines the shape in `src/lib/onboarding/onboarding-state.ts` — exactly `step`, `privacyGoal`, `categories`, `startingPoint`, every one an id from a closed vocabulary. Read through `parseOnboardingState`, never raw: the column's only database constraint is `jsonb_typeof(...) = 'object'`, so a malformed or tampered value must degrade to a usable flow rather than break it. Recovery is field-by-field, and an unreadable step falls back to the first one. AI-processing consent is deliberately **not** stored here — restoring a ticked box would produce agreement the user never gave on that visit (ATL-016, ATL-078). Cleared when onboarding completes, since every answer is then held in its own column.
 - `privacy_goal`
 - `selected_categories`: asset categories chosen during onboarding
 - `demo_data_enabled`
@@ -198,6 +198,8 @@ All identifiers use UUIDs. All tables include `created_at` and `updated_at` unle
 - `notes`
 - `metadata_json`
 
+ATL-027 implementation notes. `status`, `source_type`, and `confidence` are check-constrained in SQL **and** listed in `src/lib/assets/asset-fields.ts` — deliberate duplication, because §11's rules read these values and a drifted one would silently change what a rule means. `category` is constrained by shape only; its vocabulary stays in `src/lib/assets/categories.ts` so an append-only migration never has to race an application constant. `metadata_json` is allowlisted in `src/lib/assets/asset-metadata.ts`, built on the ATL-085 redaction utility rather than a parallel validator; the column is not in the §8 encrypted inventory, so anything restricted reaching it would be stored in plaintext. Clients get `select`, `insert`, and `update` scoped to `auth.uid() = user_id`, and no `delete`: removal is a status transition (ATL-036), and hard deletion is server-side only — demo removal (ATL-083) and the account cascade.
+
 ### 7.3 asset_data_categories
 
 - `id`
@@ -209,6 +211,12 @@ All identifiers use UUIDs. All tables include `created_at` and `updated_at` unle
 - `source`
 - `confidence`
 
+ATL-028 implementation notes. **Cross-user protection is structural**: the foreign key is composite — `(user_id, asset_id)` references `digital_assets (user_id, id)` — so a row claiming one owner while pointing at another's asset cannot exist, even for service-role writes that bypass RLS. A single-column reference would have satisfied referential integrity while leaving such a row invisible to both users and still countable by the rules engine. The composite target required adding `unique (user_id, id)` to `digital_assets`, done additively in ATL-028's own migration rather than by editing ATL-027's.
+
+**`sensitivity` is a generated column, not a stored choice.** ADR-004 fixes the high-sensitivity set at financial, health, biometric, and location, and the score's data-sensitivity factor counts active-asset × high-sensitivity-category pairs from that list — so sensitivity is a property of the category, not of the row. Postgres generates it (`high` for the ADR-004 set, `standard` otherwise) and rejects any attempt to supply or update it. The same mapping is mirrored in `src/lib/assets/data-categories.ts` for the application, and the schema test asserts the two agree. A writable column would let a user downgrade a `financial` category to keep it out of their own score.
+
+`unique (user_id, asset_id, category)` prevents one fact being recorded twice, which would deduct twice in ADR-004's factor and inflate R-008's count. Clients get `delete` here, unlike `digital_assets`: removing a category is ordinary editing (ATL-033), not the destruction of a record carrying its own history.
+
 ### 7.4 asset_permissions
 
 - `id`
@@ -218,6 +226,12 @@ All identifiers use UUIDs. All tables include `created_at` and `updated_at` unle
 - `scope`
 - `status`
 - `last_verified_at`
+
+ATL-029 implementation notes. §7.4 enumerates none of these, and only two values appear anywhere in the documentation — `broad` (R-004, ADR-004) and `active` (R-004, R-005) — so each vocabulary below was settled as a product decision and sized to the smallest set its consumers need.
+
+**`scope` is `broad | limited`** — a classification, not the raw grant. ADR-004's factor is `100 × (1 − broad-scope active ÷ total recorded)` and R-004 asks only "is this broad?", so both consumers read a binary. A richer scope list can be added later without changing what the score reads. **`status` is `active | revoked | unknown`**: only `active` raises R-004/R-005, but *every* status counts in ADR-004's "total recorded" denominator — that asymmetry is deliberate, so revoking a permission improves the factor rather than erasing the evidence it existed. `unknown` exists because the honesty rules do not permit forcing a user to assert a state they cannot verify. **`permission_type` is shape-constrained in SQL and vocabulary-constrained in the application** — the same split `digital_assets.category` uses. The list, settled as a product decision in ATL-033 because no document enumerated one, is `account_access | data_sharing | marketing | device_access | other`, grouped by what the permission lets a service do to the user rather than by any provider's naming. It lives in `src/lib/assets/permissions.ts`, is enforced by `AssetService.addPermission`, and is offered as a fixed choice in the UI: free text would let one grant be recorded under two names, and both would count in ADR-004's "total recorded" denominator. Widening the list later is additive and needs no migration, which is why it is not a SQL enum.
+
+**There is no expiry column.** §7.4 lists none and no rule or factor reads one; R-005 measures staleness from `last_verified_at`, where null (never verified) is included in the stale population rather than skipped. Cross-user protection reuses ATL-028's composite foreign key against `digital_assets (user_id, id)`, so ATL-029 needed no additive constraint of its own. `unique (user_id, asset_id, permission_type)` keeps a duplicate from moving ADR-004's denominator.
 
 ### 7.5 privacy_findings
 
@@ -445,6 +459,16 @@ Disabling history hard-deletes all conversations and messages. Deleted with the 
 - archiveAsset
 - restoreAsset
 - deleteAsset
+
+ATL-030 implementation notes (`src/server/assets/asset-service.ts`). Methods return a discriminated `AssetResult<T>` carrying an `ApiErrorCode`, **not** an `ApiEnvelope`: `requestId` is request-scoped, so the route handler or Server Action adds it and builds the envelope at the boundary. Failure modes stay visible in each signature, which throwing would hide.
+
+Every method takes the user id as its first argument, supplied from a verified session and never from a payload (§10). A missing or foreign asset both answer `NOT_FOUND` — deliberately indistinguishable, because `FORBIDDEN` on a record you do not own confirms it exists, which is the leak ATL-034's "404, not 403" criterion exists to prevent. `NOT_FOUND` was added to `API_ERROR_CODES` for this; the union had no variant for it.
+
+Archive and restore are conditional transitions (`expectedStatus` in SQL), so a repeat archive answers `NOT_FOUND` rather than writing a second activity event for something that did not change. `deleteAsset` performs the authorized deletion and emits `asset.deleted`, but writes **no audit event** — ATL-037 owns permanent deletion's confirmation flow, its audit record, and finding auto-resolution.
+
+Activity emission and findings recompute are both best effort and neither can undo the mutation: the write already succeeded and is the user's. Recompute goes through an injected `FindingsRecomputeQueue` whose default is a no-op (`src/server/findings/recompute-queue.ts`) — §14 names the job but no queue transport is specified anywhere, and ATL-101 owns the job itself. Shipping the seam now means the *call sites* are already correct.
+
+List queries are keyset-paginated on `(created_at desc, id desc)`, matching ATL-027's indexes so a filtered page is an index scan rather than a scan plus sort. Filters are category, status, source, and last-reviewed. Frontend §6's **risk** filter is absent: it derives from findings, which do not exist until M6, and accepting a parameter that does nothing would leave a caller unable to tell an inert filter from one that matched nothing.
 
 ### FindingService
 

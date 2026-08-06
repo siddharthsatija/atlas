@@ -45,6 +45,97 @@ export type Database = {
         }
         Relationships: []
       }
+      asset_data_categories: {
+        Row: {
+          asset_id: string
+          category: string
+          confidence: string
+          created_at: string
+          description: string | null
+          id: string
+          sensitivity: string | null
+          source: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          asset_id: string
+          category: string
+          confidence?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          sensitivity?: string | null
+          source?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          asset_id?: string
+          category?: string
+          confidence?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          sensitivity?: string | null
+          source?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_data_categories_asset_fkey"
+            columns: ["user_id", "asset_id"]
+            isOneToOne: false
+            referencedRelation: "digital_assets"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
+      asset_permissions: {
+        Row: {
+          asset_id: string
+          created_at: string
+          id: string
+          last_verified_at: string | null
+          permission_type: string
+          scope: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          asset_id: string
+          created_at?: string
+          id?: string
+          last_verified_at?: string | null
+          permission_type: string
+          scope: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          asset_id?: string
+          created_at?: string
+          id?: string
+          last_verified_at?: string | null
+          permission_type?: string
+          scope?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_permissions_asset_fkey"
+            columns: ["user_id", "asset_id"]
+            isOneToOne: false
+            referencedRelation: "digital_assets"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
       audit_events: {
         Row: {
           actor_type: string
@@ -110,6 +201,60 @@ export type Database = {
           id?: string
           policy_version?: string
           recorded_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      digital_assets: {
+        Row: {
+          account_identifier_encrypted: string | null
+          category: string
+          confidence: string
+          created_at: string
+          id: string
+          last_verified_at: string | null
+          metadata_json: Json
+          notes: string | null
+          service_domain: string | null
+          service_name: string
+          source_label: string | null
+          source_type: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_identifier_encrypted?: string | null
+          category: string
+          confidence?: string
+          created_at?: string
+          id?: string
+          last_verified_at?: string | null
+          metadata_json?: Json
+          notes?: string | null
+          service_domain?: string | null
+          service_name: string
+          source_label?: string | null
+          source_type?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_identifier_encrypted?: string | null
+          category?: string
+          confidence?: string
+          created_at?: string
+          id?: string
+          last_verified_at?: string | null
+          metadata_json?: Json
+          notes?: string | null
+          service_domain?: string | null
+          service_name?: string
+          source_label?: string | null
+          source_type?: string
+          status?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []

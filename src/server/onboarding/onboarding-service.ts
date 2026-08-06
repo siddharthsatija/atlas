@@ -5,6 +5,7 @@ import type { Database } from "@/types/database.generated";
 import { createServiceRoleClient } from "@/server/db/service-role-client";
 import { isAssetCategory } from "@/lib/assets/categories";
 import { isPrivacyGoal, isStartingPoint } from "@/lib/onboarding/onboarding-steps";
+import { parseOnboardingState, type OnboardingState } from "@/lib/onboarding/onboarding-state";
 import { ConsentService } from "@/server/consent/consent-service";
 import { ActivityWriter } from "@/server/activity/activity-writer";
 import { ProfileRepository, type ProfileRecord } from "@/server/repositories/profile-repository";
@@ -14,9 +15,12 @@ import { logger } from "@/lib/telemetry/logger";
  * Onboarding completion (ATL-016).
  *
  * Owns the *end* of the flow: validating what the user chose, capturing
- * AI-processing consent, and marking the profile complete. The step-by-step
- * journey is UI state; saving and resuming it is **ATL-017**, and this service
- * deliberately never touches `onboarding_state_json`.
+ * AI-processing consent, and marking the profile complete.
+ *
+ * **ATL-017** added `saveProgress`, so the service now also owns the resumable
+ * middle of the flow — `onboarding_state_json`. Both paths validate against the
+ * same closed vocabularies, which is the point of keeping them together: a value
+ * the completion path would reject must not be one the resume path stores.
  *
  * ## Everything it collects is a choice from a fixed set
  *
@@ -77,6 +81,24 @@ export class OnboardingService {
   /** The profile as onboarding needs it, creating the row on first visit. */
   async start(userId: string): Promise<ProfileRecord> {
     return this.profiles.ensure(userId);
+  }
+
+  /**
+   * Saves where the user has got to (ATL-017, frontend §17 "Save progress").
+   *
+   * Every value is re-derived from the closed vocabularies rather than trusted,
+   * exactly as `complete` does below — this arrives from a browser, and the two
+   * paths must not disagree about what is a legal answer. An unrecognised value
+   * is dropped, not stored and not rejected: progress saving is a convenience,
+   * and failing a user's whole step because one id was stale would cost them the
+   * answers that were fine.
+   *
+   * Returns false when the profile is already complete, which the caller treats
+   * as "nothing to save" rather than as an error.
+   */
+  async saveProgress(userId: string, state: OnboardingState): Promise<boolean> {
+    await this.profiles.ensure(userId);
+    return this.profiles.saveOnboardingState(userId, parseOnboardingState(state));
   }
 
   async complete(input: CompleteOnboardingInput): Promise<CompleteOnboardingResult> {

@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { requireVerifiedUser } from "@/server/auth/require-user";
 import { OnboardingService } from "@/server/onboarding/onboarding-service";
+import type { OnboardingState } from "@/lib/onboarding/onboarding-state";
 import type { CompleteOnboardingState } from "./form-state";
 
 /**
@@ -55,4 +56,39 @@ export async function completeOnboardingAction(
   // Outside the try: `redirect` signals by throwing, and catching it here would
   // turn a successful completion into an error banner.
   redirect("/overview");
+}
+
+/**
+ * Saves resumable progress (ATL-017).
+ *
+ * Called as the user moves between steps, so a refresh, a closed tab, or a
+ * return the next day resumes where they left off instead of starting over.
+ *
+ * ## Never blocks the interaction
+ *
+ * Failures are swallowed and the caller does not await the result. Stepping
+ * forward is a local state change that must feel instant; making it wait on a
+ * round trip — or worse, fail because one did — trades a working flow for a
+ * saved position. A dropped save costs the user their place if they leave, which
+ * is exactly the situation they were in before this ticket.
+ *
+ * This mirrors the ATL-006 sidebar preference: apply immediately, persist
+ * optimistically, never let persistence gate the UI.
+ *
+ * The user id comes from the session, never the payload (architecture §10), and
+ * the state is validated by the service against the same vocabularies the
+ * completion path uses.
+ */
+export async function saveOnboardingProgressAction(state: OnboardingState): Promise<void> {
+  try {
+    const user = await requireVerifiedUser();
+    await OnboardingService.create().saveProgress(user.id, state);
+  } catch {
+    /**
+     * Deliberately silent, and deliberately not logged with any of the state.
+     * The values are non-sensitive by construction, but a save that fails on
+     * every step would otherwise write a line per step per user for a fault the
+     * user never sees. The service already logs storage failures.
+     */
+  }
 }

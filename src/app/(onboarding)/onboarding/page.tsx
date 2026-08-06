@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireVerifiedUser } from "@/server/auth/require-user";
 import { OnboardingService } from "@/server/onboarding/onboarding-service";
 import { OnboardingFlow } from "./onboarding-flow";
+import { saveOnboardingProgressAction } from "./actions";
 
 /**
  * Onboarding (ATL-016, frontend §17, PRD §9.1).
@@ -29,5 +30,21 @@ export default async function OnboardingPage() {
 
   if (profile.onboardingCompletedAt !== null) redirect("/overview");
 
-  return <OnboardingFlow />;
+  /**
+   * Saved progress is resolved here, on the server (ATL-017).
+   *
+   * The flow therefore renders at the resumed step on the first paint. Fetching
+   * it after mount would show the introduction and then jump, which reads as the
+   * product losing the user's place and then finding it again.
+   *
+   * `profile.onboardingState` is already parsed by the repository, so a corrupt
+   * row arrives here as a usable state rather than as a value this page has to
+   * defend against.
+   */
+  return (
+    <OnboardingFlow
+      initialState={profile.onboardingState}
+      onStateChange={saveOnboardingProgressAction}
+    />
+  );
 }

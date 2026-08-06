@@ -71,8 +71,8 @@ export default tseslint.config(
     ignores: [
       ".next/**",
       "coverage/**",
-      "playwright-report/**",
-      "test-results/**",
+      "playwright-report*/**",
+      "test-results*/**",
       "node_modules/**",
       "src/types/database.generated.ts",
       // Supabase CLI scratch output. Gitignored, not project source, and outside

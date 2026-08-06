@@ -47,6 +47,15 @@ export const API_ERROR_CODES = [
   "UNAUTHENTICATED",
   /** Authenticated, but not permitted. */
   "FORBIDDEN",
+  /**
+   * The entity does not exist, **or** does not belong to the caller (ATL-030).
+   *
+   * Those two cases are deliberately indistinguishable. ATL-034 requires a
+   * cross-user asset access to answer 404 rather than 403, because `FORBIDDEN`
+   * on a record you do not own confirms that the record exists — a small leak,
+   * but one that turns a guessed id into an oracle.
+   */
+  "NOT_FOUND",
   /** A dependency is unavailable. Never carries the provider's own message. */
   "UNAVAILABLE",
 ] as const;

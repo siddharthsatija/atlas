@@ -17,11 +17,13 @@ Which request-letter framing ships first: generic, GDPR-flavored, CCPA-flavored,
 - Affects ATL-059 draft templates and legal review scope. Drafts already avoid legal threats and unsupported claims regardless.
 - Engineering recommendation: generic template plus optional GDPR/CCPA variants chosen by the user, clearly labeled as not legal advice. Needs legal review either way.
 
-## OQ-03 · Demo mode before account creation
+## OQ-03 · Demo mode before account creation — **resolved: post-signup only**
 
-PRD open decision retained: is demo mode available pre-signup?
+PRD open decision, now answered: demo mode is available **only after account creation**.
 
-- Current architecture assumes per-user demo data post-signup (ATL-018). A pre-auth demo would need a separate, stateless implementation.
+- Demo data is per-user, keyed to a profile, labelled `source_type = 'demo'`, and removable in one action (ATL-018 seeds it, ATL-083 removes it). `digital_assets.source_type` (ATL-027) is the column that carries the label, and `digital_assets_demo_idx` is the partial index the seed, the demo-only score, and the removal all use.
+- No pre-authentication demo surface ships. A stateless variant would need a separate implementation with no user row behind it, and nothing in the MVP depends on it.
+- Consequence for §11.2: every demo score is computed over demo records belonging to a signed-in user, so the "demo and real records never mix" rule stays a per-user query predicate rather than a separate code path.
 
 ## OQ-04 · Score fairness for disputed findings
 
