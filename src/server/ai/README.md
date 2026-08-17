@@ -99,3 +99,33 @@ A violation fails closed and falls back deterministically. It is never displayed
 Additionally: no tools are exposed to the model, retrieved user text is delimited as
 untrusted, findings and score are never model-derived, and prompts and completions
 are never logged.
+
+## The injection suite (ATL-089)
+
+`prompt-injection.integration.test.ts` attacks the controls above with payloads
+planted in stored records — service names, categories, data categories, finding
+text — and in the person's own question. Payloads live in
+`evals/injection-cases.ts`, and **each one names the specification clause it
+defends** (AI behavior §5, §9, §10, §2.8; security §T3). A payload that defends
+nothing written down would be a threat model this project never agreed to.
+
+What it establishes, and the distinction matters:
+
+- Injected text cannot change **what Atlas does** — what it retrieves, what
+  leaves the process, what it will display. These are properties of this code
+  and are decided by the suite.
+- It cannot establish that the **model** behaves. The model is a third party.
+  What the suite proves instead is that misbehaviour is *inert*: a complying
+  model still cannot widen retrieval (retrieval already happened), still cannot
+  cite a record that was not sent (the invariant layer rejects it), and still
+  cannot execute anything (no execution path exists).
+
+It runs in CI without a provider, for the reason `evals/harness.ts` records: CI
+holds a placeholder key, and a gate that cannot run in CI is not a gate. Payloads
+exercise the real assembly and retrieval seams through doubles; output grading is
+a pure function over recorded text, using `EVAL_RULES` plus the injection-specific
+rules. The live-model pass stays the pre-release step (architecture §902).
+
+The registered system policy is asserted directly, so a future policy version that
+drops the untrusted-context section fails here rather than leaving every payload
+passing against a defence that had quietly gone.
