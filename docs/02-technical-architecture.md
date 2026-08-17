@@ -417,6 +417,23 @@ In-app notifications (see ADR-005). Created server-side only.
 - `created_at` (no `updated_at`)
 - Purged after 90 days by background job; deleted with the account.
 
+Implemented by ATL-107. `title` and `body` are composed server-side from the per-type templates in `src/lib/notifications/notification-types.ts` and are never accepted as caller-supplied strings — `NotificationService` is the only writer, and it scans the composed text for restricted patterns and refuses the write if any survive. `entity_type` and `entity_id` are paired by a check constraint: both or neither. The client policy is `select` only; creation, read-state changes, and the purge are server-side.
+
+### 7.14a notification_preferences
+
+Per-type notification overrides (see ADR-005). Added by ATL-107; §7 previously specified no preference storage, and none existed — `profiles` has no such column, and `consents` is an append-only history of user agreements rather than a mutable toggle.
+
+- `id`
+- `user_id`
+- `notification_type`: the §7.14 vocabulary, constrained; `security` is additionally forbidden by its own check constraint
+- `enabled`: the person's explicit choice
+- `created_at`, `updated_at` (shared `set_updated_at` trigger)
+- Unique on `(user_id, notification_type)`; deleted with the account.
+
+**A row is an override, not a setting.** Absence means "use the default declared beside the type in `src/lib/notifications/notification-types.ts`". Defaults and configurability live in code because they describe the type rather than any user, because Settings (ATL-077) and the service both need them and features may not import `src/server`, and because a default written into a table would require a backfill and would leave accounts created before a change permanently disagreeing with accounts created after. Clearing an override therefore returns a type to whatever the default then is, which storing the default's current value would not.
+
+**`security` has no row, by two independent gates.** It is declared `configurable: false`, so `NotificationService` refuses to persist a preference for it and never consults one when creating; and the table refuses such a row outright, so "security notifications cannot be disabled" (FR-14) does not depend on the service being the only writer. Product-update consent is deliberately **not** mirrored here — `consents` (`consent_type = product_updates`) remains its single source of truth.
+
 ### 7.15 audit_events
 
 Internal security audit log (see ADR-006). RLS enabled with **no client policies** (deny all); written only by the server-side audit writer. Application role has INSERT and SELECT only — no UPDATE or DELETE.
