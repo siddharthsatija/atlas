@@ -48,6 +48,20 @@ export const API_ERROR_CODES = [
   /** Authenticated, but not permitted. */
   "FORBIDDEN",
   /**
+   * The operation needs a consent the person has not granted (ATL-105).
+   *
+   * Distinct from `FORBIDDEN` because the remedy is different and the UI has to
+   * say so: `FORBIDDEN` means "not yours", which no user action resolves, while
+   * this means "you have not agreed to this yet", which a consent prompt does.
+   * Collapsing them would leave ATL-106 unable to offer the one control that
+   * clears the condition.
+   *
+   * The service never records the consent itself — that is the consent flow's
+   * job, and a persistence layer that manufactured consent would make the
+   * record meaningless (ADR-002, ATL-078).
+   */
+  "CONSENT_REQUIRED",
+  /**
    * The entity does not exist, **or** does not belong to the caller (ATL-030).
    *
    * Those two cases are deliberately indistinguishable. ATL-034 requires a

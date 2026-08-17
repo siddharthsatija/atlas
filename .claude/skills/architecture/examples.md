@@ -109,7 +109,7 @@ const fields = await personalFieldsRepository.listApproved(userId, keys); // rea
 ```ts
 // inside RequestService
 const fields = await personalFieldsService.getApprovedFieldsForDraft(userId, approvedKeys);
-// PersonalFieldsService enforces consent, decryption, and last_used_at bookkeeping
+// PersonalFieldService enforces consent, decryption, and last_used_at bookkeeping
 ```
 
 ## 4. Typed errors at the boundary

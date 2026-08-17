@@ -580,12 +580,30 @@ The audit event (`finding.resolved`) is written **after** the status change comm
 - autoResolveFindings
 - runNightlySweep
 
-### PersonalFieldsService
+### PersonalFieldService
 
-- listFields
-- upsertField
-- deleteField
-- getApprovedFieldsForDraft
+- listMasked _(ATL-105; the default read)_
+- save _(ATL-105)_
+- edit _(ATL-105)_
+- remove _(ATL-105)_
+- reveal _(ATL-105; the only plaintext path)_
+- markUsed _(ATL-105; no production caller until ATL-058)_
+- isStoragePermitted _(ATL-105; the consent gate, readable by callers)_
+- getApprovedFieldsForDraft _(not built; deferred to ATL-058 with the approval step it depends on)_
+
+Renamed from `PersonalFieldsService` and re-specified against what ATL-105 implemented. The previous list named `listFields`, `upsertField` and `deleteField`, omitted `reveal` — which frontend §15 and ATL-106 both require — and included `getApprovedFieldsForDraft`, which ATL-105 must not build. The names below encode the properties that matter at the call site rather than leaving them to a reader's assumption.
+
+**`listMasked` is the default read path and never returns plaintext.** Masking happens inside the method, so there is no way to obtain a full value through it at all — the same construction as `AssetService.readMaskedAccountIdentifier`, and the reason that method is not called `readAccountIdentifier`. A useful mask requires the plaintext (`a•••@example.com` cannot be derived from ciphertext), so the method decrypts, masks, and discards. It is deliberately **not** consent-gated: reading back what is already stored is not a new act of storage, and gating it would hide a person's own data from them the moment they revoked.
+
+**`reveal` is the deliberate plaintext path and is audited.** The only method here that returns a stored value in full. It emits `personal_field.revealed` (security §8, ADR-006) — the event `asset-service.ts` already uses for the equivalent action on an account identifier — after the value is obtained, so the record never claims a disclosure that failed. The context carries `reason` and `method` only.
+
+**`save` and `edit` are gated; `remove` and the reads are not.** Both writes require an existing `personal_fields_storage` consent and answer `CONSENT_REQUIRED` without it. The service **never records consent**: consent is a user action, not a side effect of persistence, so `ConsentService` stays the single source of truth and the consent flow (ATL-106) owns the recording. `remove` is ungated on purpose — deletion is the safe direction, and a gate there would stop a person removing the very values their revocation was about (ADR-002, security §14).
+
+**`markUsed` exists now, but ATL-058 is its first production caller.** It stamps `last_used_at` from the database clock (ATL-113) on the fields an approved draft included. Nothing calls it today, because the only thing that *uses* a field is a request draft; the seam is implemented and tested rather than deferred so the column has a maintainer the moment drafting lands, and no write is manufactured to make it look busy.
+
+**Personal-field retrieval for AI and request drafting remains gated by explicit per-request approval.** ATL-105 created the storage; it did not make any value eligible to send. ADR-002 makes approval — not storage — the thing that permits a value to leave, and the approval step is ATL-058. `policy-map.ts` still supplies no stored values to `draft_request`, `includedPersonalFieldKeys` is still `[]`, and ATL-050's subset check already fails closed on anything a model claims beyond what was approved.
+
+`CONSENT_REQUIRED` was added to `API_ERROR_CODES` for this (ATL-105); the union had no variant for it, and `FORBIDDEN` means "not yours" — a condition no user action resolves — where this means "not yet agreed", which a consent prompt does.
 
 ### NotificationService
 

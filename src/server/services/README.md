@@ -1,7 +1,7 @@
 # Application services
 
 One service per domain concept (architecture §9): `AssetService`, `FindingService`,
-`FindingsEngine`, `PrivacyScoreService`, `RequestService`, `PersonalFieldsService`,
+`FindingsEngine`, `PrivacyScoreService`, `RequestService`, `PersonalFieldService`,
 `NotificationService`, `AssistantService`.
 
 ## Shape

@@ -599,6 +599,39 @@ export type Database = {
         }
         Relationships: []
       }
+      user_personal_fields: {
+        Row: {
+          created_at: string
+          field_key: string
+          id: string
+          label: string
+          last_used_at: string | null
+          updated_at: string
+          user_id: string
+          value_encrypted: string
+        }
+        Insert: {
+          created_at?: string
+          field_key: string
+          id?: string
+          label: string
+          last_used_at?: string | null
+          updated_at?: string
+          user_id: string
+          value_encrypted: string
+        }
+        Update: {
+          created_at?: string
+          field_key?: string
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          updated_at?: string
+          user_id?: string
+          value_encrypted?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

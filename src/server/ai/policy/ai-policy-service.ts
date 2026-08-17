@@ -55,11 +55,13 @@ import { assembleContextBlock, contextIdsOf, type ContextEntry } from "./context
  *
  * ## What is deferred, and why that is honest
  *
- * `draft_request` enforces per-request field approval but retrieves no stored
- * values: `user_personal_fields` does not exist (ATL-105) and the approval step
- * is ATL-058. The enforcement is real today — ATL-050 intersects the model's
- * claimed keys against the approved set and fails closed — even though the
- * storage source is not built.
+ * `draft_request` enforces per-request field approval but still retrieves no
+ * stored values. `user_personal_fields` exists since ATL-105; what does not exist
+ * is the approval step, which is ATL-058 — and ADR-002 makes approval, not
+ * storage, the thing that permits a value to be sent. The enforcement is real
+ * today: ATL-050 intersects the model's claimed keys against the approved set and
+ * fails closed. Until ATL-058 that approved set is whatever the caller declares,
+ * and no stored field is read.
  *
  * Only `explain_finding` has a registered prompt (ATL-051 authored prompts for
  * consumers that exist). Other purposes retrieve correctly and then report
@@ -313,9 +315,11 @@ export class AiPolicyService {
     const contextIds = contextIdsOf(retrieved.entries);
 
     /**
-     * Included field keys are empty until ATL-105 supplies stored values. The
-     * classification is therefore honest about what was actually sent rather
-     * than about what was permitted.
+     * Empty because no stored field is retrieved, not because none can be stored.
+     * ATL-105 created `user_personal_fields`; ATL-058 adds the per-request
+     * approval that would make a value eligible to send. Until then this stays
+     * `[]`, and the classification is honest about what was actually sent rather
+     * than about what the purpose is permitted to send.
      */
     const classification = classifyContext({
       recordIds: contextIds,

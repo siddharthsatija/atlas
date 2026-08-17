@@ -93,11 +93,15 @@ export const PURPOSE_POLICIES: Record<AiPurpose, PurposePolicy> = {
    * The only purpose permitting personal-field values, and only those approved
    * **in the current flow** (ADR-002: storage is not permission).
    *
-   * Retrieval of stored fields is deferred: `user_personal_fields` does not
-   * exist yet (ATL-105) and the approval step is ATL-058. ATL-049 enforces the
-   * rule today by intersecting whatever keys the caller declares against what
-   * the model claims it used — the enforcement is real even though the storage
-   * source is not built.
+   * Storage now exists — ATL-105 created `user_personal_fields` — but retrieval
+   * is still deferred, and the distinction is the point: ADR-002 makes approval
+   * per-request, so a stored value becomes eligible only once the person ticks it
+   * in the draft flow, which is ATL-058. Nothing in this layer reads the table,
+   * and `draft_request` supplies no stored values today.
+   *
+   * ATL-049 already enforces the rule that will govern them, by intersecting
+   * whatever keys the caller declares against what the model claims it used. The
+   * enforcement is real; what it enforces against arrives with ATL-058.
    */
   draft_request: {
     allows: ["approved_personal_fields"],

@@ -48,11 +48,11 @@ Database/providers    storage and external systems. RLS enforced here.
 
 ## Service boundaries
 
-One service per domain concept, per architecture §9: `AssetService`, `FindingService`, `FindingsEngine`, `PrivacyScoreService`, `RequestService`, `PersonalFieldsService`, `NotificationService`, `AssistantService`, `AuditWriter`.
+One service per domain concept, per architecture §9: `AssetService`, `FindingService`, `FindingsEngine`, `PrivacyScoreService`, `RequestService`, `PersonalFieldService`, `NotificationService`, `AssistantService`, `AuditWriter`.
 
 - **Services own authorization.** Every public method verifies the caller owns the entity even though RLS also protects it. Never trust a `user_id` argument that originated client-side.
 - **Services own events.** State changes emit activity and audit through the shared emitter (ADR-006) from one call site so the two records cannot drift.
-- **Services never touch another service's repository.** Cross-domain work is service to service (e.g. `RequestService` asks `PersonalFieldsService` for approved fields).
+- **Services never touch another service's repository.** Cross-domain work is service to service (e.g. `RequestService` asks `PersonalFieldService` for approved fields).
 - **Keep the engine separate from the reader.** `FindingsEngine` generates, dedups, and auto-resolves; `FindingService` reads and handles user actions. The engine stays a pure rule evaluator (ADR-001).
 - **One writer per derived value.** Only `PrivacyScoreService` writes score snapshots. Never a feature action, never AI.
 
