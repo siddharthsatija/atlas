@@ -265,6 +265,35 @@ export class DataRequestRepository {
     return (data ?? []).map(toRecord);
   }
 
+  /**
+   * Requests still in `sent` whose `sent_at` is older than `cutoff` (ATL-057).
+   *
+   * The read behind §13's three-day `sent -> awaiting_response` job. **Crosses
+   * users deliberately** — a sweep is not about one person, and every other
+   * method here is owner-scoped precisely because it serves a person's own
+   * request. The job-read precedent is `NotificationRepository.purgeOlderThan`,
+   * which is unscoped for the same reason.
+   *
+   * The predicate is the idempotency: only rows still in `sent` match, so a row
+   * this run has already moved cannot be picked up by the next one. Bounded by
+   * `limit` so one busy account cannot starve a run, and ordered oldest-first so
+   * a backlog drains in the order it accumulated rather than by chance.
+   */
+  async listSentBefore(cutoff: string, limit: number): Promise<DataRequestRecord[]> {
+    const { data, error } = await this.db
+      .from("data_requests")
+      .select(COLUMNS)
+      .eq("status", "sent")
+      .not("sent_at", "is", null)
+      .lt("sent_at", cutoff)
+      .order("sent_at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(limit);
+
+    if (error) throw new DataRequestStoreError("list sent before");
+    return (data ?? []).map(toRecord);
+  }
+
   /** One request, or null when it does not exist or is not this person's. */
   async find(userId: string, requestId: string): Promise<DataRequestRecord | null> {
     const { data, error } = await this.db

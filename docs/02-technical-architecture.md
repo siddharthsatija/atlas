@@ -995,6 +995,22 @@ Transition semantics:
 
 Transitions are validated server-side, protected by idempotency keys (§7.17), and recorded in `request_events` and `audit_events`.
 
+**ATL-057 implementation notes.**
+
+**One method owns all four obligations.** `RequestService.transition` (`src/server/requests/request-service.ts`) validates against `ALLOWED_REQUEST_TRANSITIONS`, runs inside an idempotency claim, and writes both records. `DataRequestRepository.updateStatus` remains what ATL-056 made it — a write seam that validates nothing — so the rules cannot be bypassed by calling the repository directly. A refusal is `REQUEST_INVALID_TRANSITION`, added to `ApiErrorCode` by this ticket: the input was well-formed and the *state* forbids it, which no correction of the payload resolves.
+
+**Idempotency keys are supplied by the caller, never derived.** A key derived from the request id and the statuses would collapse two genuinely separate actions into one — §13 permits `follow_up_due → sent` once per follow-up a person sends, and the second would become a silent replay of the first. The scope is `request_transition`, which §7.17 and the `idempotency_keys` migration already name. The one exception is the sweep below, where the job *is* the caller and derives a key from the request and its own cutoff.
+
+**Write order, and what may fail.** The status change is primary; `request_events` and `audit_events` are **required** and their failure fails the call; `activity_events` and the score recalculation are **best effort** and are logged rather than propagated. A committed transition is never rolled back because a global-feed row did not persist — the trade `AssetService.afterMutation` already makes. Because PostgREST cannot open a transaction, a required-record failure leaves a committed status change with a failed call; that is why the idempotency key matters, and why a required failure records no result and leaves the claim in flight rather than reporting a success it cannot evidence.
+
+**Retry semantics.** A retry with the same `(userId, request_transition, key)` replays the recorded result and does **not** transition again — including when the first attempt committed the transition and then lost a best-effort write, because steps 4 and 5 cannot change what the handler returned. A refusal is recorded and replayed too, so a retry is told the same thing rather than re-deciding it. A retry while a claim is still in flight answers `UNAVAILABLE`.
+
+**Optimistic concurrency is not a caller-visible condition.** `updateStatus` matches only while the row still holds the status that was validated, so a concurrent move matches nothing. One re-read then decides the answer: gone → `NOT_FOUND`, still present → `REQUEST_INVALID_TRANSITION`. Missing and foreign requests remain indistinguishable (§9's non-oracle rule).
+
+**The three-day job is a body, not a scheduler.** `runAwaitingResponseSweep(now, batchSize)` is callable and tested, following `FindingsEngine.runNightlySweep` and `NotificationService.purgeOlderThan`; the runtime remains deferred (§21). It is pure duration arithmetic from `sent_at` — three days is an interval, not a calendar date, so no timezone is involved; the jobs README's timezone rule applies to `follow_up_at`, which ATL-066 owns. Idempotent twice over: the predicate matches only requests still in `sent`, and each move carries a key derived from the request and the cutoff. Moves are attributed `actor_type = 'system'` in both logs. Recording a response note is §13's other trigger and moves `sent → awaiting_response` immediately; a note recorded later is stored without a transition, because §13 has no edge for it.
+
+**Score recalculation is enqueued, not implemented.** `ScoreRecalculationRequest.reason` gains `request.transitioned` so the recalculation happens on the right event. `protectiveActionsFactor` still takes `completedRequests` defaulted to 0 and nothing counts the rows — ADR-004's "+20 per completed request" becomes real in the ticket that supplies the count.
+
 ## 14. Background jobs
 
 MVP jobs:

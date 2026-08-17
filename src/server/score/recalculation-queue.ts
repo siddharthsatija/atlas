@@ -50,7 +50,20 @@ export interface ScoreRecalculationRequest {
      * changes" among the recalculation triggers; the vocabulary predates
      * findings existing, so this is the value that trigger needed.
      */
-    | "finding.changed";
+    | "finding.changed"
+    /**
+     * A data request reached a terminal state (ATL-057, architecture §13).
+     *
+     * ADR-004 lists "request completion" among the recalculation triggers and
+     * credits "+20 per completed request in the trailing 180 days". This is the
+     * trigger; **it does not make the credit real.** `protectiveActionsFactor`
+     * still takes `completedRequests` as a parameter defaulted to 0, and nothing
+     * counts the rows yet — supplying that count is a change inside
+     * `PrivacyScoreService`, which is not ATL-057's to make. Enqueuing now means
+     * the recalculation happens on the right event; the number it produces simply
+     * does not change until a later ticket counts requests.
+     */
+    | "request.transitioned";
 }
 
 export interface ScoreRecalculationQueue {

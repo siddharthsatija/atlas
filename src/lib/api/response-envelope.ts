@@ -70,6 +70,28 @@ export const API_ERROR_CODES = [
    * but one that turns a guessed id into an oracle.
    */
   "NOT_FOUND",
+  /**
+   * The request cannot move from its current status to the one asked for
+   * (ATL-057, architecture §13).
+   *
+   * Distinct from `INVALID_REQUEST`, and the distinction is the reason it exists:
+   * `INVALID_REQUEST` means the input was malformed — an unknown status, a
+   * missing id — which the caller fixes by sending something different. This
+   * means the input was perfectly well-formed and the **state** forbids it, which
+   * no amount of correcting the payload resolves. A user cannot re-send a
+   * completed request; they can only be told why, and a surface that could not
+   * tell the two apart would offer "try again" for a thing that will never work.
+   *
+   * Architecture §10 already uses this code in its error-envelope example; ATL-057
+   * is the ticket that makes it real. The same precedent `CONSENT_REQUIRED` set:
+   * a condition with its own remedy earns its own code.
+   *
+   * Also returned when the row moved underneath a validated transition — a
+   * concurrent move leaves the request in a state that no longer permits what was
+   * asked, which is the same fact from the caller's point of view. Optimistic
+   * concurrency is not exposed as its own condition.
+   */
+  "REQUEST_INVALID_TRANSITION",
   /** A dependency is unavailable. Never carries the provider's own message. */
   "UNAVAILABLE",
 ] as const;

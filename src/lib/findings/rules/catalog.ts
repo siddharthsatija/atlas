@@ -18,19 +18,29 @@ import type {
  * ## Seven rules, not eight
  *
  * **R-007 (rejected_request_unresolved) is not in this catalog.** Its predicate
- * is entirely about `data_requests`, which architecture §7.7 specifies but no
- * migration creates — the table arrives in M8. A rule registered against a
- * subsystem that does not exist could never fire, and a rule that can never fire
- * is indistinguishable from one that is broken. It lands with the ticket that
- * creates the table.
+ * is "request rejected with no follow-up action for 30 days", which needs more
+ * than the table ATL-056 created: it needs the lifecycle to *mean* something —
+ * a `rejected` status a request actually reached, and the transitions that
+ * would clear it. A rule registered against a subsystem that cannot move could
+ * never fire, and a rule that can never fire is indistinguishable from one that
+ * is broken. **ATL-057 owns the lifecycle; the rule lands with the ticket that
+ * registers it, which is not ATL-056 or ATL-057.**
  *
- * **R-006 is here, evaluating what it can see.** §11.1's predicate is "archived
- * asset still lists data categories *and has no deletion request*". No request
- * can exist today, so the second conjunct is satisfied for every asset and the
- * rule's conclusion is correct as written — not simplified. When `data_requests`
- * lands, the conjunct is added and `RULES_VERSION` moves to `rules-v2`, which
- * ADR-001 already requires to be recorded on the findings a changed rule
- * generated.
+ * **R-006 evaluates only the first of its two conjuncts, and since ATL-056 that
+ * is a real gap rather than a vacuous one.** §11.1's predicate is "archived asset
+ * still lists data categories *and has no deletion request*". While no request
+ * could exist, the second conjunct held for every asset and the rule's conclusion
+ * was correct as written. `data_requests` now exists, so an archived asset with a
+ * deletion request already sent can raise R-006 — a finding telling someone to
+ * act on something they have already acted on.
+ *
+ * Not fixed here: adding the conjunct changes what a rule concludes, which
+ * ADR-001 requires to move `RULES_VERSION` to `rules-v2` and to be recorded on
+ * every finding the changed rule generates. That is a rules-catalog ticket, not
+ * ATL-056's schema or ATL-057's lifecycle. Until it lands, the gap is bounded:
+ * it needs an archived asset, retained data categories, **and** a request — a
+ * combination nothing in the product can produce yet, because no surface creates
+ * a request.
  *
  * ## Versioning
  *
