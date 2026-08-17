@@ -45,6 +45,30 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_conversations: {
+        Row: {
+          context_type: string
+          created_at: string
+          entity_id: string | null
+          id: string
+          user_id: string
+        }
+        Insert: {
+          context_type: string
+          created_at?: string
+          entity_id?: string | null
+          id?: string
+          user_id: string
+        }
+        Update: {
+          context_type?: string
+          created_at?: string
+          entity_id?: string | null
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       ai_interactions: {
         Row: {
           created_at: string
@@ -95,6 +119,41 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      ai_messages: {
+        Row: {
+          content_encrypted: string
+          conversation_id: string
+          created_at: string
+          id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          content_encrypted: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          role: string
+          user_id: string
+        }
+        Update: {
+          content_encrypted?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "ai_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       asset_data_categories: {
         Row: {

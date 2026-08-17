@@ -293,6 +293,7 @@ Events recorded (via a single emitter so activity and audit cannot drift):
 - Account deletion initiation and completion; DEK creation and destruction
 - Request state transitions
 - Consent changes — emitted by the consent service (ATL-078) as `consent.granted` / `consent.revoked`, carrying the consent type and policy version only
+- AI conversation history destruction — emitted as `ai.history_cleared` (ATL-109) when history is disabled or cleared, carrying a count only. Recorded separately from `consent.revoked` because consent is a decision and deletion is an act; only the second evidences that §14's hard-delete obligation was discharged
 - Sensitive-value reveal actions
 - Administrative elevation
 - Policy, score, and prompt versions used

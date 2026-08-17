@@ -71,6 +71,26 @@ export const AUDIT_EVENT_TYPES = [
    */
   "finding.resolved",
 
+  /**
+   * AI conversation history destroyed (ATL-109).
+   *
+   * ADR-006's MVP inventory did not name it, and the addition is deliberate
+   * rather than a quiet widening — the same amendment `finding.resolved` made.
+   * Two reasons it belongs:
+   *
+   *   1. It is irreversible destruction of user content. Security §12 audits
+   *      deletions, and "the user asked for it" is exactly the claim an audit
+   *      record exists to substantiate later.
+   *   2. `consent.revoked` alone would not say the data went. Consent is a
+   *      decision; deletion is an act. Recording only the decision would leave
+   *      no evidence that the obligation it triggered was discharged.
+   *
+   * Written after the rows are gone, so the event describes a deletion that
+   * happened rather than one that was attempted. The context carries a count and
+   * never any message content.
+   */
+  "ai.history_cleared",
+
   // Operator elevation
   "operator.elevated",
 ] as const;

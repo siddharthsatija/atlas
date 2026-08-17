@@ -18,6 +18,11 @@ import {
   type FallbackReason,
 } from "../fallback/finding-fallback";
 import { noopInteractionRecorder } from "../interaction-recorder";
+import {
+  anchorFor,
+  noopConversationHistory,
+  type AiConversationHistory,
+} from "../history/conversation-history";
 import type { StructuredCompletionService } from "../structured-completion";
 import { policyFor } from "./policy-map";
 import { classifyContext } from "./classification";
@@ -166,6 +171,15 @@ export interface AiPolicyDeps {
   completion: StructuredCompletionService;
   recorder?: AiInteractionRecorder;
   /**
+   * Conversation history (ATL-109), off unless wired.
+   *
+   * Optional and defaulted, so every existing construction of this service —
+   * and every existing test — is unchanged. History is strictly additive: it
+   * never participates in producing an answer, and it is consulted only after
+   * one has been validated.
+   */
+  history?: AiConversationHistory;
+  /**
    * The `AI_ENABLED` kill switch (ATL-052).
    *
    * Injected rather than read from env here, so the policy layer stays free of
@@ -182,6 +196,7 @@ export class AiPolicyService {
   private readonly assets: AssetService;
   private readonly completion: StructuredCompletionService;
   private readonly recorder: AiInteractionRecorder;
+  private readonly history: AiConversationHistory;
   private readonly aiEnabled: boolean;
   private readonly now: () => number;
 
@@ -191,6 +206,7 @@ export class AiPolicyService {
     assets,
     completion,
     recorder = noopInteractionRecorder,
+    history = noopConversationHistory,
     aiEnabled = true,
     now = Date.now,
   }: AiPolicyDeps) {
@@ -199,8 +215,55 @@ export class AiPolicyService {
     this.assets = assets;
     this.completion = completion;
     this.recorder = recorder;
+    this.history = history;
     this.aiEnabled = aiEnabled;
     this.now = now;
+  }
+
+  /**
+   * Stores the exchange, when the person has enabled history (ATL-109).
+   *
+   * ## Only a validated answer
+   *
+   * Called for `validated` and not for `fallback`. A fallback is Atlas's own
+   * deterministic text, assembled from the user's records because the provider
+   * could not be reached — it is not something the assistant said, and filing it
+   * as an assistant turn would make the transcript claim a conversation that did
+   * not happen.
+   *
+   * ## The stored assistant turn is the validated output verbatim
+   *
+   * `JSON.stringify(value)` rather than a prose field lifted out of it. The
+   * validated object *is* what the assistant returned; picking `summary` and
+   * discarding the rest would store a lossy paraphrase of the answer and quietly
+   * decide which parts of it mattered. It is encrypted either way.
+   *
+   * ## Failure here never fails the request
+   *
+   * The person asked a question and received a correct, validated answer. Losing
+   * the transcript is a storage problem, not a reason to withhold it — so this
+   * logs and returns rather than throwing. No message content reaches the log.
+   */
+  private async remember(request: AiPolicyRequest, value: unknown): Promise<void> {
+    const turns = [
+      ...(request.userMessage && request.userMessage.trim().length > 0
+        ? ([{ role: "user", content: request.userMessage }] as const)
+        : []),
+      { role: "assistant", content: JSON.stringify(value) } as const,
+    ];
+
+    try {
+      await this.history.append(
+        request.userId,
+        anchorFor(request.purpose, request.subjectId),
+        turns,
+      );
+    } catch {
+      logger.warn("ai.history_not_stored", {
+        operation: "ai.history",
+        provider: "ai",
+      });
+    }
   }
 
   async answer(request: AiPolicyRequest): Promise<AiPolicyResult> {
@@ -308,6 +371,7 @@ export class AiPolicyService {
       result.interactionId === undefined ? {} : { interactionId: result.interactionId };
 
     if (result.status === "validated") {
+      await this.remember(request, result.value);
       return { status: "answered", source: "ai", value: result.value, classification, ...carried };
     }
 

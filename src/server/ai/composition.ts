@@ -11,6 +11,7 @@ import { PersistentInteractionRecorder } from "./interaction-recorder";
 import { StructuredCompletionService } from "./structured-completion";
 import { outageFallbackProvider } from "./fallback/fallback-provider";
 import { AiPolicyService } from "./policy/ai-policy-service";
+import { AiHistoryService } from "./history/ai-history-service";
 
 /**
  * Production wiring for the AI subsystem (ATL-052).
@@ -40,6 +41,21 @@ export function createAiPolicyService(db: SupabaseClient<Database>): AiPolicySer
     assets: new AssetService(db),
     completion,
     recorder: new PersistentInteractionRecorder(new AiInteractionRepository(db)),
+    /**
+     * Conversation history (ATL-109), bound here for the reason this module's
+     * header gives.
+     *
+     * The policy layer defaults this to a no-op so its tests need no consent
+     * service, which means an unwired production path would store nothing and
+     * report nothing — the ATL-045 failure the header describes, repeated. It is
+     * wired here so the only way to get history is to have consented, not to
+     * have remembered.
+     *
+     * Storing remains off for everyone until `ai_conversation_history` consent
+     * exists, which the service checks on every call. The toggle that grants it
+     * is ATL-076.
+     */
+    history: AiHistoryService.create(db),
     /**
      * The kill switch. Read once here rather than inside the policy layer, so
      * the layer stays free of `@/config/env` and its tests need no environment.
