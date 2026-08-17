@@ -122,6 +122,28 @@ export const assetQuerySchema = z.object({
   sort: z.enum(ASSET_SORT_ORDERS).default(DEFAULT_ASSET_SORT),
   limit: z.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
   cursor: z.string().optional(),
+  /**
+   * Hide archived assets unless the caller asked for a status explicitly
+   * (ATL-036).
+   *
+   * ## Opt-in, not a default
+   *
+   * Defaults to `false`, so a surface inherits nothing by being written later.
+   * `parseAssetQuery` has two production callers — the asset list and the
+   * Insights page's one-row probe — and a default of `true` would have changed
+   * the second one silently. Cross-surface behaviour should not arrive through a
+   * shared parser; the asset list opts in and Insights does not.
+   *
+   * ## Why the flag rather than a defaulted `status`
+   *
+   * Filling `status` with the three non-archived values would have worked at the
+   * database, but `isFiltered()` on the assets page reads `query.status` to tell
+   * "you filtered and nothing matched" from "you have nothing yet". A defaulted
+   * status makes that permanently true, so a first-run user would be told their
+   * filters matched nothing. The flag keeps `status` meaning *what the user
+   * asked for*, which is what the empty states are reading it for.
+   */
+  excludeArchived: z.boolean().default(false),
 });
 
 export type AssetQueryInput = z.input<typeof assetQuerySchema>;
@@ -136,6 +158,13 @@ export interface AssetQuery {
   sort: AssetSortOrder;
   limit: number;
   cursor: AssetCursor | null;
+  /**
+   * Resolved intent: exclude archived rows from this read (ATL-036).
+   *
+   * Always present, never optional, so a consumer cannot forget to consider it.
+   * An explicit `status` turns it off — see `parseAssetQuery`.
+   */
+  excludeArchived: boolean;
 }
 
 export interface AssetQueryParseResult {
@@ -160,12 +189,35 @@ export function parseAssetQuery(input: unknown): AssetQueryParseResult {
   if (!result.success) {
     return {
       success: false,
-      query: { sort: DEFAULT_ASSET_SORT, limit: DEFAULT_PAGE_SIZE, cursor: null },
+      query: {
+        sort: DEFAULT_ASSET_SORT,
+        limit: DEFAULT_PAGE_SIZE,
+        cursor: null,
+        /**
+         * A rejected input falls back to "everything", matching the rest of this
+         * branch. Excluding archived here would let a malformed query quietly
+         * hide the user's records, which is a worse failure than showing more
+         * than they asked for.
+         */
+        excludeArchived: false,
+      },
     };
   }
 
-  const { category, status, source, reviewedBefore, search, sort, limit, cursor } = result.data;
+  const { category, status, source, reviewedBefore, search, sort, limit, cursor, excludeArchived } =
+    result.data;
   const decoded = cursor ? decodeAssetCursor(cursor) : null;
+
+  /**
+   * An explicit status always wins over the implicit exclusion.
+   *
+   * This is the whole of ATL-036's "only in Archive" compromise: the default
+   * view hides archived assets, and selecting `Archived` in the filter still
+   * shows them, which is the durable path to a restore until ATL-071 builds the
+   * Archive surface. Deciding it here keeps the precedence in one place rather
+   * than leaving the repository to reconcile two competing predicates.
+   */
+  const hasExplicitStatus = Boolean(status?.length);
 
   return {
     // A cursor that failed to decode is the one rejection worth reporting: the
@@ -173,6 +225,11 @@ export function parseAssetQuery(input: unknown): AssetQueryParseResult {
     success: cursor ? decoded !== null : true,
     query: {
       ...(category?.length ? { category } : {}),
+      /**
+       * Narrowed at the spread rather than via `hasExplicitStatus`: a boolean
+       * does not tell TypeScript that `status` is defined, and
+       * `exactOptionalPropertyTypes` rejects the widened type.
+       */
       ...(status?.length ? { status } : {}),
       ...(source?.length ? { source } : {}),
       ...(reviewedBefore ? { reviewedBefore } : {}),
@@ -180,6 +237,7 @@ export function parseAssetQuery(input: unknown): AssetQueryParseResult {
       sort,
       limit,
       cursor: decoded,
+      excludeArchived: excludeArchived && !hasExplicitStatus,
     },
   };
 }

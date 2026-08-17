@@ -45,7 +45,22 @@ function createDb(): SupabaseClient<Database> {
       if (operation === "insert") return { data: [{ ...pending }], error: null };
       if (operation === "update") {
         const matched = matching();
-        for (const row of matched) Object.assign(row, pending);
+        for (const row of matched) {
+          Object.assign(row, pending);
+
+          /**
+           * The BEFORE UPDATE triggers from `20260811090000` (ATL-113).
+           *
+           * The database, not the caller, now writes both of these. A fake that
+           * only assigned the patch would let these tests pass while asserting
+           * behaviour the schema no longer has — and `markReviewed` would appear
+           * to store the literal string `infinity`.
+           */
+          row.updated_at = new Date().toISOString();
+          if (row.last_verified_at === "infinity") {
+            row.last_verified_at = new Date().toISOString();
+          }
+        }
         return { data: matched.map((row) => ({ ...row })), error: null };
       }
       if (operation === "delete") {
@@ -129,6 +144,30 @@ beforeEach(() => {
   const db = createDb();
   service = new AssetService(db, new ActivityWriter(db), recomputeQueue);
 });
+
+/**
+ * A service whose every `update()` payload is recorded (ATL-113).
+ *
+ * Wraps the same fake rather than reimplementing it, so the captured patch is
+ * the one the repository actually built.
+ */
+function serviceSpying(patches: Row[]): InstanceType<typeof AssetService> {
+  const db = createDb();
+  const from = db.from.bind(db) as unknown as (table: string) => Record<string, unknown>;
+  const spying = {
+    from: (table: string) => {
+      const builder = from(table);
+      const update = builder.update as (values: Row) => unknown;
+      builder.update = (values: Row) => {
+        patches.push({ ...values });
+        return update(values);
+      };
+      return builder;
+    },
+  } as unknown as SupabaseClient<Database>;
+
+  return new AssetService(spying, new ActivityWriter(spying), recomputeQueue);
+}
 
 const unwrap = <T>(result: { ok: true; data: T } | { ok: false; code: string }): T => {
   if (!result.ok) throw new Error(`expected success, got ${result.code}`);
@@ -236,6 +275,28 @@ describe("status transitions", () => {
 });
 
 describe("the review action", () => {
+  it("sends no timestamp of its own (ATL-113)", async () => {
+    /**
+     * The defect this replaced: `markReviewed` sent `new Date().toISOString()`,
+     * and `digital_assets_last_verified_not_future` judged it with the
+     * database's clock. Two clocks, one comparison — it rejected three ordinary
+     * reviews in a single local run, and the user was told nothing.
+     *
+     * Asserted on the patch itself, because that is where the regression would
+     * reappear: putting a timestamp back is a one-line change that looks
+     * harmless.
+     */
+    const asset = await create();
+    const patches: Row[] = [];
+    const spy = serviceSpying(patches);
+
+    unwrap(await spy.markReviewed(ALICE, asset.id));
+
+    expect(patches).toHaveLength(1);
+    expect(patches[0]?.last_verified_at).toBe("infinity");
+    expect(patches[0]).not.toHaveProperty("updated_at");
+  });
+
   it("sets the review date", async () => {
     const asset = await create();
     expect(asset.lastVerifiedAt).toBeNull();

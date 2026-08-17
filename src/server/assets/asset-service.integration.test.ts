@@ -43,7 +43,7 @@ const tableOf = (name: string) => {
 interface Filter {
   column: string;
   value: unknown;
-  op: "eq" | "in" | "or";
+  op: "eq" | "neq" | "in" | "or";
   raw?: string;
 }
 
@@ -91,6 +91,8 @@ function createDb(): SupabaseClient<Database> {
       [...store.values()].filter((row) =>
         filters.every((filter) => {
           if (filter.op === "eq") return row[filter.column] === filter.value;
+          /** ATL-036's default archived exclusion reaches the builder as `neq`. */
+          if (filter.op === "neq") return row[filter.column] !== filter.value;
           if (filter.op === "in") return (filter.value as unknown[]).includes(row[filter.column]);
           return matchesOr(row, filter.raw as string);
         }),
@@ -133,6 +135,10 @@ function createDb(): SupabaseClient<Database> {
       select: () => self,
       eq: (column: string, value: unknown) => {
         filters.push({ column, value, op: "eq" });
+        return self;
+      },
+      neq: (column: string, value: unknown) => {
+        filters.push({ column, value, op: "neq" });
         return self;
       },
       in: (column: string, value: unknown[]) => {
@@ -436,6 +442,80 @@ describe("filters and pagination", () => {
     const page = unwrap(await service.listAssets(ALICE, query({ status: ["archived"] })));
 
     expect(page.items.map((item) => item.serviceName)).toEqual(["Archived One"]);
+  });
+
+  /**
+   * ATL-036 — the default exclusion, executed against the real repository.
+   *
+   * `parseAssetQuery` decides whether the exclusion applies; these assert that
+   * the decision reaches the database predicate and changes what comes back.
+   * Every case seeds one archived and one active asset, so an empty result would
+   * be a failure rather than a vacuous pass.
+   */
+  const seedOneOfEach = async () => {
+    const archived = unwrap(await createFor(ALICE, "Archived One"));
+    unwrap(await createFor(ALICE, "Active One"));
+    await service.archiveAsset(ALICE, archived.id);
+  };
+
+  it("hides archived assets when the caller opts in and names no status", async () => {
+    await seedOneOfEach();
+
+    const page = unwrap(await service.listAssets(ALICE, query({ excludeArchived: true })));
+
+    expect(page.items.map((item) => item.serviceName)).toEqual(["Active One"]);
+  });
+
+  it("returns archived assets when the caller does not opt in", async () => {
+    await seedOneOfEach();
+
+    /** Today's behaviour for every surface that has not asked for the exclusion. */
+    const page = unwrap(await service.listAssets(ALICE, query()));
+
+    expect(page.items.map((item) => item.serviceName).sort()).toEqual([
+      "Active One",
+      "Archived One",
+    ]);
+  });
+
+  it("returns archived assets when the filter asks for them, even with the opt-in", async () => {
+    await seedOneOfEach();
+
+    const page = unwrap(
+      await service.listAssets(ALICE, query({ excludeArchived: true, status: ["archived"] })),
+    );
+
+    expect(page.items.map((item) => item.serviceName)).toEqual(["Archived One"]);
+  });
+
+  it("combines the exclusion with an unrelated filter", async () => {
+    const archived = unwrap(
+      await service.createAsset(ALICE, { serviceName: "Archived Finance", category: "finance" }),
+    );
+    unwrap(
+      await service.createAsset(ALICE, { serviceName: "Active Finance", category: "finance" }),
+    );
+    unwrap(await service.createAsset(ALICE, { serviceName: "Active Social", category: "social" }));
+    await service.archiveAsset(ALICE, archived.id);
+
+    const page = unwrap(
+      await service.listAssets(ALICE, query({ excludeArchived: true, category: ["finance"] })),
+    );
+
+    expect(page.items.map((item) => item.serviceName)).toEqual(["Active Finance"]);
+  });
+
+  it("brings a restored asset back into the default view", async () => {
+    const asset = unwrap(await createFor(ALICE, "Round Trip"));
+    await service.archiveAsset(ALICE, asset.id);
+
+    const hidden = unwrap(await service.listAssets(ALICE, query({ excludeArchived: true })));
+    expect(hidden.items).toHaveLength(0);
+
+    await service.restoreAsset(ALICE, asset.id);
+
+    const shown = unwrap(await service.listAssets(ALICE, query({ excludeArchived: true })));
+    expect(shown.items.map((item) => item.serviceName)).toEqual(["Round Trip"]);
   });
 
   it("filters by source", async () => {

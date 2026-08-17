@@ -27,6 +27,9 @@ function env(overrides: Partial<ServerEnv> = {}): ServerEnv {
     ATLAS_KEK_VERSION: 1,
     AUDIT_HMAC_KEY: HMAC,
     ANTHROPIC_API_KEY: "anthropic-key-value",
+    // ATL-052's kill switch. Defaults to true, so the fixture matches a
+    // deployment that has not set it.
+    AI_ENABLED: true,
     RATE_LIMIT_REDIS_URL: "http://127.0.0.1:6379",
     RATE_LIMIT_REDIS_TOKEN: "redis-token-value",
     ...overrides,

@@ -432,6 +432,40 @@ describe("index usage on the timeline query", () => {
      * The predicate is the exact `or(...)` PostgREST emits for a cursor, so this
      * asserts the plan for what the repository sends rather than an idealised
      * version of it.
+     *
+     * ## Why this case does not assert the absence of `Sort`, unlike the ones below
+     *
+     * `A OR B` is not a range, so a cursor expressed as a disjunction cannot
+     * become an index boundary. PostgreSQL therefore has two legal shapes here,
+     * and both are correct:
+     *
+     *   1. an ordered Index Scan with `Index Cond: (user_id = $1)` and the whole
+     *      disjunction demoted to a `Filter`; or
+     *   2. a `BitmapOr` of the two disjuncts, which returns rows in heap order
+     *      and consequently requires an explicit `Sort`.
+     *
+     * Which one is chosen is a cost decision resting on the planner's estimate
+     * of how many rows the filter rejects before admitting 50 — and that
+     * estimate is wrong by construction, because a cursor is perfectly
+     * correlated with the sort order and PostgreSQL has no way to represent
+     * that. Measured on PostgreSQL 17.10 over identical 12,000-row tables: the
+     * ordered scan is chosen at 12 users x 1000 rows, and BitmapOr + Sort at
+     * 40 users x 300 rows. Neither is a regression; the shape simply is not
+     * determined by this SQL.
+     *
+     * So the previous `expect(plan).not.toMatch(SORT_NODE)` asserted a property
+     * the current query cannot structurally guarantee, and it failed for that
+     * reason rather than because anything regressed. It is deliberately not
+     * asserted. It is also not replaced with a weaker planner assertion — the
+     * remaining plan check below is structural, and the behavioural check after
+     * it is what actually carries the weight.
+     *
+     * The real fix is the row comparison `(occurred_at, id) < ($2, $3)`, which
+     * PostgreSQL compiles into `Index Cond: (user_id = $1 AND ROW(occurred_at,
+     * id) < ROW($2, $3))` — a true seek with no alternative shape to flip to,
+     * and no `Sort` possible. PostgREST cannot express a row comparison, so it
+     * needs a SQL function. Tracked as **ATL-114**, which also owns correcting
+     * two comments that currently overstate today's guarantee.
      */
     const anchor = await pg!.query(
       `select occurred_at, id from public.activity_events
@@ -440,16 +474,56 @@ describe("index usage on the timeline query", () => {
     );
     const { occurred_at: occurredAt, id } = anchor.rows[0] as { occurred_at: Date; id: string };
 
+    const cursorPredicate = `where user_id = $1 and (occurred_at < $2 or (occurred_at = $2 and id < $3))`;
+
     const plan = await planFor(
       `select * from public.activity_events
-       where user_id = $1 and (occurred_at < $2 or (occurred_at = $2 and id < $3))
+       ${cursorPredicate}
        order by occurred_at desc, id desc
        limit 50`,
       [alice.id, occurredAt, id],
     );
 
+    /**
+     * Structural, not cost-dependent: `user_id` is the leading column of
+     * `activity_events_timeline_idx` and is equality-constrained, so that index
+     * is the access path under either shape — as an ordered scan's `Index Cond`
+     * or inside the `BitmapOr`. A plan without it would mean the index had
+     * stopped being usable for the timeline, which is the failure this block
+     * exists to catch.
+     */
     expect(plan).toContain("activity_events_timeline_idx");
-    expect(plan).not.toMatch(SORT_NODE);
+
+    /**
+     * What the plan assertion can no longer cover: that the page is right.
+     *
+     * Correctness is not a planner property — whichever shape PostgreSQL picks,
+     * the keyset page must contain exactly the rows the offset-addressed page it
+     * stands in for contains, in the same order. The anchor sits at offset 200,
+     * so the rows strictly after it begin at offset 201. This is deterministic
+     * and would catch a genuinely broken cursor (a repeated or skipped row at a
+     * page boundary), which is the defect the `id` tiebreak exists to prevent
+     * and which no plan assertion ever checked.
+     */
+    const keysetPage = await pg!.query(
+      `select id from public.activity_events
+       ${cursorPredicate}
+       order by occurred_at desc, id desc
+       limit 50`,
+      [alice.id, occurredAt, id],
+    );
+    const offsetPage = await pg!.query(
+      `select id from public.activity_events
+       where user_id = $1
+       order by occurred_at desc, id desc
+       offset 201 limit 50`,
+      [alice.id],
+    );
+
+    expect(keysetPage.rows).toHaveLength(50);
+    expect(keysetPage.rows.map((row: { id: string }) => row.id)).toEqual(
+      offsetPage.rows.map((row: { id: string }) => row.id),
+    );
   });
 
   /**
@@ -460,6 +534,18 @@ describe("index usage on the timeline query", () => {
    * `Incremental Sort` counts: it is what appears when an index provides part of
    * the ordering but not the tiebreak, and it is how the missing `id` column on
    * the action-filter index showed up.
+   *
+   * This applies only to the two cases below, and the distinction is not a
+   * matter of degree. Their predicates are pure equality on an index prefix
+   * (`user_id`, or `user_id` plus `event_type`), so the index supplies the full
+   * `occurred_at desc, id desc` ordering as an `Index Cond` and no other plan
+   * shape can satisfy the `order by` without a sort it would have to pay for.
+   * Forbidding `Sort` there is a structural claim about the index, and it holds
+   * regardless of statistics or row counts.
+   *
+   * The keyset case above is excluded because its cursor is a disjunction rather
+   * than a range, which leaves the plan shape genuinely undetermined. See the
+   * comment there and ATL-114.
    */
   const SORT_NODE = /^\s*(->\s*)?(Incremental\s+)?Sort\b/m;
 

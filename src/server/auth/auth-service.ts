@@ -1,12 +1,16 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 import {
   isPlausibleEmail,
+  readErrorStatus,
   toCallbackResultCode,
   toMagicLinkResultCode,
+  toSessionCheckStatus,
+  type SessionCheckStatus,
   type CallbackResult,
   type MagicLinkResult,
   type OAuthStartResult,
 } from "@/lib/auth/auth-result";
+import { logger } from "@/lib/telemetry/logger";
 
 /**
  * Authentication operations (ATL-011).
@@ -157,11 +161,95 @@ export async function completeAuthCallback(
  * ATL-012 builds route protection on top of this; ATL-011 only provides it.
  */
 export async function getVerifiedUser(auth: AuthClient) {
+  const result = await verifySession(auth);
+  return result.status === "authenticated" ? result.user : null;
+}
+
+/**
+ * The result of verifying the current session (ATL-111).
+ *
+ * `user` exists only on the authenticated branch, so a caller cannot read it
+ * without having handled the other two — the discrimination is enforced by the
+ * type rather than by remembering to check.
+ */
+export type SessionCheck =
+  | { status: "authenticated"; user: User }
+  | { status: "unauthenticated" }
+  | { status: "unavailable" };
+
+/**
+ * Verifies the session and says which of the three things happened (ATL-111).
+ *
+ * `getVerifiedUser` above is now a projection of this, kept because "the user or
+ * nothing" is genuinely all some callers need. What it must never again be is
+ * the *only* option: for anything that redirects, the difference between "no
+ * session" and "could not check" is the difference between a correct sign-out
+ * and telling a signed-in user a falsehood.
+ *
+ * A thrown error and a returned one are both provider failures and are treated
+ * identically. `supabase-js` returns an `AuthRetryableFetchError` for a network
+ * failure rather than throwing, but a DNS failure, an aborted request, or a
+ * malformed response can still throw, and a `catch` that returned "no session"
+ * would reintroduce the defect through the back door.
+ */
+/**
+ * Classifies a `getUser()` failure and, when no verdict was reached, records
+ * which kind of silence it was.
+ *
+ * ## Why the log lives here rather than at the throw site
+ *
+ * `require-user.ts` already logs `auth.provider_unavailable`, but by then the
+ * error object is gone — only the mapped status survives the call. A 429, a 500
+ * and a connection that never left Node were therefore indistinguishable in the
+ * logs, which is the gap this closes. Classification itself is unchanged:
+ * `toSessionCheckStatus` decides, exactly as before.
+ *
+ * ## What is recorded, and what cannot be
+ *
+ * Only two allowlisted fields carry the diagnosis — the numeric HTTP status when
+ * the provider supplied one, and a constant naming the class otherwise. The
+ * error's message, body, headers and any token or address inside them are never
+ * read. `LOG_FIELD_POLICY` would drop an unknown key anyway, so this is enforced
+ * by the logger as well as by intent.
+ */
+function classifySessionFailure(error: unknown): Exclude<SessionCheckStatus, "authenticated"> {
+  const status = toSessionCheckStatus(error);
+
+  /** A 4xx is a verdict, not an outage. It redirects, and needs no log. */
+  if (status !== "unavailable") return status;
+
+  const providerStatus = readErrorStatus(error);
+
+  logger.error("auth.verify_unavailable", {
+    /*
+      `auth.session`, not `auth.verify_session`: `LOG_FIELD_POLICY` requires
+      `operation` to match /^[a-z][a-z0-9]*(?:\.[a-z0-9]+)*$/, so an underscore
+      makes the field fail redaction and vanish from the record. The existing
+      call in `require-user.ts` passes `auth.verify_session` and has therefore
+      been logging no operation at all — worth a separate follow-up, and not
+      changed here.
+    */
+    operation: "auth.session",
+    provider: "auth",
+    providerAvailable: false,
+    ...(providerStatus === undefined ? {} : { status: providerStatus }),
+    errorCode:
+      providerStatus === undefined ? "PROVIDER_STATUS_NONE" : `PROVIDER_STATUS_${providerStatus}`,
+  });
+
+  return status;
+}
+
+export async function verifySession(auth: AuthClient): Promise<SessionCheck> {
   try {
     const { data, error } = await auth.getUser();
-    if (error) return null;
-    return data.user ?? null;
-  } catch {
-    return null;
+
+    if (error) return { status: classifySessionFailure(error) };
+
+    // No error and no user is the provider answering plainly: there is no
+    // session. This is the ordinary signed-out path and must keep redirecting.
+    return data.user ? { status: "authenticated", user: data.user } : { status: "unauthenticated" };
+  } catch (error) {
+    return { status: classifySessionFailure(error) };
   }
 }

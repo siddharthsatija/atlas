@@ -119,6 +119,28 @@ extend their own session. Closing it requires server-side session records, which
 arrive with the active-session list in ATL-075; the marker shape is deliberately
 minimal so that swap is contained.
 
+#### When the auth provider cannot be reached (ATL-111)
+
+Verifying a session has **three** outcomes, not two: the provider confirms the
+token, the provider gives a verdict of no session, or the provider does not
+answer at all. `verifySession` (`src/server/auth/auth-service.ts`) returns which,
+classifying a failure on HTTP status — a 4xx is a verdict, a 429, a 5xx, or a
+transport failure with no status is not.
+
+- **Unauthenticated** redirects to sign-in, exactly as before, with the same
+  neutral `reason` codes on the expiry path.
+- **Unavailable** does **not** redirect. `requireVerifiedUser` throws, and
+  ATL-010's route boundary renders a calm retry inside the product. No cookie is
+  cleared, no provider session is revoked, and the user is not told they are
+  signed out — because Atlas does not know that. Middleware passes the request
+  through for the same reason; the layout is the authoritative gate and refuses
+  there.
+
+This is **not** the rate-limit store's "fail open, loudly" (§5). Nothing renders
+on `unavailable`: an unverified token is not authorization evidence
+(architecture §5), so the request is still refused. What changes is only where
+the refusal is reported and what it claims.
+
 ## 6. Authorization
 
 ### Roles

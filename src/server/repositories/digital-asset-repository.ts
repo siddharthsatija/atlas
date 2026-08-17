@@ -232,6 +232,18 @@ export class DigitalAssetRepository {
     if (query.status?.length) builder = builder.in("status", query.status);
     if (query.source?.length) builder = builder.in("source_type", query.source);
 
+    /**
+     * ATL-036's default exclusion, executed rather than decided here.
+     *
+     * `parseAssetQuery` already resolved whether it applies — an explicit status
+     * turns it off — so this is one predicate on the query that was going to run
+     * anyway, not a second read and not a policy this layer owns.
+     *
+     * `listAllForUser` deliberately has no equivalent: the rules engine needs
+     * every status, and R-006 reads archived assets specifically.
+     */
+    if (query.excludeArchived) builder = builder.neq("status", "archived");
+
     if (query.reviewedBefore) {
       // Never-verified assets are included: they are at least as stale as
       // anything verified long ago, and hiding them would conceal exactly the
@@ -281,22 +293,41 @@ export class DigitalAssetRepository {
   /**
    * Applies an ownership-scoped partial update.
    *
-   * `updated_at` is set here rather than left to a trigger: no trigger exists,
-   * and a row whose contents changed while its timestamp did not would make the
-   * asset list's ordering and the staleness rules disagree about when it last
-   * moved.
+   * `updated_at` is **not** set here. `digital_assets_set_updated_at` (ATL-113)
+   * maintains it from the database clock, which is what the ordering and the
+   * staleness rules are compared against — a timestamp supplied by every caller
+   * is one that is eventually wrong, and one supplied by a *different clock*
+   * than the constraint judging it is wrong on a schedule.
    *
    * Returns null when nothing matched — which covers both "no such asset" and
    * "not yours", deliberately indistinguishable at this layer.
    */
+  /**
+   * Every asset the user has, whatever its status.
+   *
+   * `list` is keyset-paginated for the UI; the rules engine (ATL-101) needs the
+   * whole set in one snapshot, and every status matters — R-002 reads inactive
+   * assets and R-006 reads archived ones, so a status filter here would make
+   * those rules silently unable to fire.
+   */
+  async listAllForUser(userId: string): Promise<DigitalAssetRecord[]> {
+    const { data, error } = await this.db
+      .from("digital_assets")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
+
+    if (error) throw new DigitalAssetStoreError();
+    return (data ?? []).map(toRecord);
+  }
+
   async update(
     userId: string,
     assetId: string,
     changes: UpdateDigitalAssetInput,
   ): Promise<DigitalAssetRecord | null> {
-    const patch: Database["public"]["Tables"]["digital_assets"]["Update"] = {
-      updated_at: new Date().toISOString(),
-    };
+    const patch: Database["public"]["Tables"]["digital_assets"]["Update"] = {};
 
     if (changes.serviceName !== undefined) patch.service_name = changes.serviceName;
     if (changes.serviceDomain !== undefined) patch.service_domain = changes.serviceDomain;
@@ -338,7 +369,7 @@ export class DigitalAssetRepository {
   ): Promise<DigitalAssetRecord | null> {
     let builder = this.db
       .from("digital_assets")
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ status })
       .eq("id", assetId)
       .eq("user_id", userId);
 

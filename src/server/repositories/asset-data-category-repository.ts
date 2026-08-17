@@ -140,6 +140,23 @@ export class AssetDataCategoryRepository {
    * which ask only about the high set. Filtered on the generated column so the
    * partial index applies and the definition of "high" stays in one place.
    */
+  /**
+   * Every category the user has recorded, across all their assets.
+   *
+   * The rules engine (ATL-101) evaluates a whole-footprint snapshot, so it needs
+   * one query rather than one per asset. Added here rather than assembled by the
+   * engine so the ownership predicate stays in the layer that owns it.
+   */
+  async listForUser(userId: string): Promise<AssetDataCategoryRecord[]> {
+    const { data, error } = await this.db
+      .from("asset_data_categories")
+      .select("*")
+      .eq("user_id", userId);
+
+    if (error) throw new AssetDataCategoryStoreError();
+    return (data ?? []).map(toRecord);
+  }
+
   async listHighSensitivity(userId: string): Promise<AssetDataCategoryRecord[]> {
     const { data, error } = await this.db
       .from("asset_data_categories")

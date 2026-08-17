@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { AssetCard, type AssetSummary } from "./asset-card";
-import { AssetsFilteredEmptyState, AssetsFirstRunEmptyState } from "./asset-empty-states";
+import {
+  AssetsFilteredEmptyState,
+  AssetsFirstRunEmptyState,
+  AssetsNoActiveEmptyState,
+} from "./asset-empty-states";
+import type { AssetActionFormState } from "./asset-action-form";
 
 /**
  * The results region of the asset list (ATL-031, frontend §6).
@@ -15,26 +20,51 @@ export interface AssetListProps {
   assets: AssetSummary[];
   /** True when the user has no assets at all, as opposed to none matching. */
   isFirstRun: boolean;
+  /**
+   * True when this read hid archived assets (ATL-036).
+   *
+   * Distinct from `isFirstRun`: an empty default list may mean "nothing yet" or
+   * "everything is archived", and the copy must not assert either.
+   */
+  excludedArchived?: boolean;
   compact?: boolean;
   nextCursor: string | null;
   /** The current query as a query string, so paging keeps the filters. */
   queryString: string;
+  /**
+   * Passed straight through to every card (ATL-036 M5).
+   *
+   * The list owns no state of its own here — it is the only path from the route
+   * to the card, and a feature component cannot import from `app/`.
+   */
+  archive: (state: AssetActionFormState, formData: FormData) => Promise<AssetActionFormState>;
+  restore: (state: AssetActionFormState, formData: FormData) => Promise<AssetActionFormState>;
 }
 
 export function AssetList({
   assets,
   isFirstRun,
+  excludedArchived = false,
   compact = false,
   nextCursor,
   queryString,
+  archive,
+  restore,
 }: AssetListProps) {
   if (assets.length === 0) {
     /**
-     * Which empty state depends on *why* it is empty, and the two must not be
+     * Which empty state depends on *why* it is empty, and the three must not be
      * confused: telling someone whose filter matched nothing that they have no
-     * services would read as data loss.
+     * services would read as data loss, and so would telling someone whose
+     * services are all archived.
+     *
+     * Order matters. A user who filtered *and* got nothing gets the filtered
+     * state even on a read that also hid archived rows, because the filter is
+     * the thing they can act on.
      */
-    return isFirstRun ? <AssetsFirstRunEmptyState /> : <AssetsFilteredEmptyState />;
+    if (!isFirstRun) return <AssetsFilteredEmptyState />;
+
+    return excludedArchived ? <AssetsNoActiveEmptyState /> : <AssetsFirstRunEmptyState />;
   }
 
   const nextHref = nextCursor
@@ -55,11 +85,27 @@ export function AssetList({
       <ul
         data-slot="asset-list"
         data-view={compact ? "compact" : "grid"}
-        className={compact ? "flex flex-col gap-2" : "grid gap-4 sm:grid-cols-2 xl:grid-cols-3"}
+        /*
+          `grid-cols-1` is load-bearing below `sm`, despite looking redundant.
+
+          Without it no `grid-template-columns` is declared at that width, so the
+          implicit column is sized `auto` — which resolves to the items'
+          max-content width. A card whose content did not fit 320px therefore
+          widened the track past the container and scrolled the page sideways;
+          measured at 320px, the track was 319.172px inside a 288px list.
+
+          `grid-cols-1` compiles to `repeat(1, minmax(0, 1fr))`, and the
+          `minmax(0, …)` is the part that matters: it lets the track shrink below
+          max-content. `grid-cols-2` and `grid-cols-3` already carry it, which is
+          why the overflow only ever appeared under `sm`.
+        */
+        className={
+          compact ? "flex flex-col gap-2" : "grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+        }
       >
         {assets.map((asset) => (
           <li key={asset.id}>
-            <AssetCard asset={asset} compact={compact} />
+            <AssetCard asset={asset} compact={compact} archive={archive} restore={restore} />
           </li>
         ))}
       </ul>

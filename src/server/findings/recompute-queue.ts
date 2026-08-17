@@ -1,6 +1,7 @@
 import "server-only";
 
 import { logger } from "@/lib/telemetry/logger";
+import { FindingsEngine } from "./findings-engine";
 
 /**
  * The findings-recompute seam (ATL-030, architecture §11 and §14).
@@ -60,5 +61,38 @@ export class NoopFindingsRecomputeQueue implements FindingsRecomputeQueue {
       providerAvailable: false,
     });
     return Promise.resolve();
+  }
+}
+
+/**
+ * The real implementation (ATL-101).
+ *
+ * Evaluates in-process: `enqueue` runs the engine for that user and returns when
+ * it is done. No queue table, no runner, no transport — none is specified
+ * anywhere in the documentation, and inventing durable infrastructure is a
+ * decision this ticket has no more mandate to make than ATL-030 did.
+ *
+ * That is safe here in a way it would not be for an arbitrary job: the engine is
+ * deterministic and idempotent, so a duplicate call changes nothing, and a
+ * mutation that fails after evaluation leaves no half-written state — findings
+ * are reconciled against the records, not accumulated.
+ *
+ * The cost is honest and worth stating: rule evaluation happens inside the
+ * request that mutated the asset. When a scheduling ticket introduces a real
+ * transport, this class becomes its producer and the call sites do not change.
+ */
+export class EngineFindingsRecomputeQueue implements FindingsRecomputeQueue {
+  private readonly engine: FindingsEngine;
+
+  constructor(engine: FindingsEngine) {
+    this.engine = engine;
+  }
+
+  static create(): EngineFindingsRecomputeQueue {
+    return new EngineFindingsRecomputeQueue(FindingsEngine.create());
+  }
+
+  async enqueue(request: RecomputeRequest): Promise<void> {
+    await this.engine.generateFindings(request.userId);
   }
 }

@@ -71,6 +71,34 @@ async function createAsset(
 /** The form a control belongs to, so `Add` is never ambiguous between the two. */
 const formWith = (page: Page, controlId: string) => page.locator(`form:has(#${controlId})`);
 
+/**
+ * A `<select>` on this page, addressed by role rather than by label.
+ *
+ * `getByLabel` is a substring, case-insensitive match against *any* accessible
+ * name, and since ATL-112 each of these controls sits inside an
+ * `AssetActionForm` that carries its own `aria-label` — "Update status" for the
+ * status select, "Add permission" for the permission one. Both forms therefore
+ * answered to the control's label as well, and strict mode failed on two
+ * matches.
+ *
+ * The form names are correct and stay: they are what lets a screen-reader user
+ * tell seven otherwise identical forms apart. Role is what separates them from
+ * the controls inside — a form is not a combobox — and `getByRole` matches the
+ * whole accessible name rather than a fragment of it, so "Status" no longer
+ * finds "Update status" either.
+ */
+const selectNamed = (page: Page, name: string) => page.getByRole("combobox", { name, exact: true });
+
+/**
+ * Atlas's own mutation-error banner, rendered by `AssetActionForm` (ATL-112).
+ *
+ * Deliberately not `getByRole("alert")`: Next ships a permanent, empty
+ * `<div role="alert" id="__next-route-announcer__">` on every page, so the role
+ * query resolves whether or not anything went wrong. This slot is present only
+ * when there is a failure to report.
+ */
+const mutationError = (page: Page) => page.locator("[data-slot='asset-action-error']");
+
 /** The list item for one permission or category, so `Remove` is unambiguous. */
 const rowFor = (page: Page, text: string | RegExp) =>
   page.getByRole("listitem").filter({ hasText: text });
@@ -119,7 +147,26 @@ test.describe("editing details", () => {
 
     await page.waitForURL(new RegExp(`/assets/${id}$`));
     await expect(page.getByRole("heading", { level: 1, name: renamed })).toBeVisible();
-    await expect(page.getByText("example.com")).toBeVisible();
+
+    /**
+     * Scoped to Overview, because ATL-034 gave the domain two homes.
+     *
+     * Frontend §7's detail page shows it twice, both legitimately: as the
+     * subtitle under the identity header, and as the "Website" fact in Overview.
+     * An unscoped `getByText` matched both and tripped strict mode — the page
+     * was right and the locator had become ambiguous.
+     *
+     * Overview is the canonical one. It is the labelled row in the record's own
+     * facts, where §7 says every factual item lives; the header subtitle is
+     * presentation. Asserting there also keeps the test honest about *what* it
+     * checks — that the edit reached the stored record — rather than that the
+     * string appears somewhere on the page.
+     *
+     * Overview is expanded by default, so nothing has to be opened first.
+     */
+    await expect(
+      page.locator("[data-slot='asset-section-overview']").getByText("example.com"),
+    ).toBeVisible();
   });
 
   test("keeps what was typed when validation fails", async ({ page }) => {
@@ -149,12 +196,12 @@ test.describe("status", () => {
     const { id } = await createAsset(page, "Status");
 
     await page.goto(`/assets/${id}/edit`);
-    await expect(page.getByLabel("Status")).toHaveValue("active");
+    await expect(selectNamed(page, "Status")).toHaveValue("active");
 
     for (const status of ["inactive", "removed"] as const) {
-      await page.getByLabel("Status").selectOption(status);
+      await selectNamed(page, "Status").selectOption(status);
       await page.getByRole("button", { name: "Update status" }).click();
-      await expect(page.getByLabel("Status")).toHaveValue(status);
+      await expect(selectNamed(page, "Status")).toHaveValue(status);
     }
   });
 
@@ -168,8 +215,7 @@ test.describe("status", () => {
 
     await page.goto(`/assets/${id}/edit`);
 
-    const values = await page
-      .getByLabel("Status")
+    const values = await selectNamed(page, "Status")
       .locator("option")
       .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
     expect(values).toEqual(["active", "inactive", "removed"]);
@@ -186,6 +232,17 @@ test.describe("review", () => {
     await page.getByRole("button", { name: "Mark as reviewed" }).click();
 
     await expect(page.getByText(/Last reviewed \d{4}-\d{2}-\d{2}\./)).toBeVisible();
+
+    /**
+     * And silently: a successful write says nothing (ATL-112).
+     *
+     * Scoped to Atlas's own error slot, not `getByRole("alert")`. Next renders a
+     * permanent `#__next-route-announcer__` with that role on every page, so the
+     * global query matched an empty element and reported a failure on a review
+     * that had plainly succeeded — the paragraph above says "Last reviewed".
+     * This locator exists only when `AssetActionForm` has a failure to show.
+     */
+    await expect(mutationError(page)).toHaveCount(0);
   });
 
   test("an ordinary save does not count as a review", async ({ page }) => {
@@ -217,7 +274,7 @@ test.describe("information held", () => {
     await page.goto(`/assets/${id}/edit`);
     await expect(page.getByText("Nothing recorded yet.").first()).toBeVisible();
 
-    await page.getByLabel("Add what this service holds").selectOption("contact");
+    await selectNamed(page, "Add what this service holds").selectOption("contact");
     await formWith(page, "category-add").getByRole("button", { name: "Add" }).click();
     await expect(rowFor(page, "contact")).toBeVisible();
 
@@ -231,8 +288,8 @@ test.describe("permissions", () => {
     const { id } = await createAsset(page, "Permissions");
 
     await page.goto(`/assets/${id}/edit`);
-    await page.getByLabel("Permission").selectOption("account_access");
-    await page.getByLabel("How much it grants").selectOption("broad");
+    await selectNamed(page, "Permission").selectOption("account_access");
+    await selectNamed(page, "How much it grants").selectOption("broad");
     await formWith(page, "permissionType").getByRole("button", { name: "Add" }).click();
 
     await expect(rowFor(page, "Act on your behalf")).toBeVisible();
@@ -248,7 +305,7 @@ test.describe("permissions", () => {
     const { id } = await createAsset(page, "Revoke");
 
     await page.goto(`/assets/${id}/edit`);
-    await page.getByLabel("Permission").selectOption("data_sharing");
+    await selectNamed(page, "Permission").selectOption("data_sharing");
     await formWith(page, "permissionType").getByRole("button", { name: "Add" }).click();
 
     const row = rowFor(page, "Share your data");
@@ -273,9 +330,14 @@ test.describe("permissions", () => {
 
     await page.goto(`/assets/${id}/edit`);
 
-    await expect(page.getByLabel("Permission")).toHaveJSProperty("tagName", "SELECT");
-    const values = await page
-      .getByLabel("Permission")
+    /*
+      By id, not by role: asserting `getByRole("combobox")` here would presuppose
+      the very thing under test. The question is whether the control *is* a
+      fixed-choice select rather than a free-text box, so it is located without
+      reference to its role and then asked what it is.
+    */
+    await expect(page.locator("#permissionType")).toHaveJSProperty("tagName", "SELECT");
+    const values = await selectNamed(page, "Permission")
       .locator("option")
       .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
     expect(values).toEqual([
@@ -321,7 +383,28 @@ test.describe("another user", () => {
     await page.close();
   }
 
-  test("can neither open nor mutate someone else's service", async ({ page, browser }) => {
+  /**
+   * One project, and the reason is not convenience.
+   *
+   * Authorization is decided in the service and the database; nothing about it
+   * varies with viewport width, so running this three times asserts the same
+   * server behaviour three times. It is not free: each run is a full magic-link
+   * round trip, and a trace showed the suite exceeding GoTrue's local
+   * `email_sent` allowance — at which point onboarding tests failed on a message
+   * the product was correct to display. Two of those sends were this test.
+   *
+   * Every assertion below is unchanged: the read refusals *and* the cross-user
+   * write attempt still run in full.
+   */
+  test("can neither open nor mutate someone else's service", async ({
+    page,
+    browser,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "chromium",
+      "authorization does not vary by viewport; see the comment above",
+    );
+
     const { id } = await createAsset(page, "CrossUser");
 
     await page.goto(`/assets/${id}/edit`);
@@ -344,6 +427,31 @@ test.describe("another user", () => {
     await page.context().addCookies(intruderCookies);
     await page.getByRole("button", { name: "Mark as reviewed" }).click();
 
+    /**
+     * The refusal is now *visible* (ATL-112). It used to be silent, which read
+     * as success — and a refusal indistinguishable from success is one nobody
+     * can act on.
+     *
+     * It surfaces as a 404, not as the inline error, and that is the product
+     * behaving correctly: the Server Action re-renders `/assets/{id}/edit`, the
+     * page's own `listAssetDetails` answers `NOT_FOUND` for a user who does not
+     * own the asset, and `notFound()` replaces the view. The same non-oracle
+     * rule as everywhere else — a 403 would confirm the id names something real.
+     *
+     * The inline slot is asserted empty alongside it, because the failure worth
+     * guarding against is the opposite one: an intruder shown a page that
+     * behaves as though their write landed.
+     */
+    await expect(
+      /*
+        The heading, not the text. Next's route announcer carries the same
+        sentence with a "404: " prefix, so `getByText` matched two elements and
+        tripped strict mode — the 404 was rendering correctly the whole time.
+      */
+      page.getByRole("heading", { name: "This page could not be found.", exact: true }),
+    ).toBeVisible();
+    await expect(mutationError(page)).toHaveCount(0);
+
     await intruder.close();
 
     // Back as the owner: the review date must not have moved.
@@ -365,18 +473,18 @@ test.describe("@a11y accessibility", () => {
      *
      * The wait between the two additions is load-bearing, not caution. `click`
      * resolves when the click is dispatched, not when the Server Action it
-     * triggers has re-rendered the page — and every form on this route is
-     * server-rendered and uncontrolled, so that re-render remounts the
-     * *permission* select too, back to its first option. Choosing a permission
+     * triggers has re-rendered the page — and every select on this route is
+     * uncontrolled, so that re-render remounts the *permission* select too,
+     * back to its first option. Choosing a permission
      * while the category's re-render is still in flight therefore loses the
      * choice, and the row that appears is the default one. Waiting for the first
      * mutation to land is the only ordering that submits what was selected.
      */
-    await page.getByLabel("Add what this service holds").selectOption("financial");
+    await selectNamed(page, "Add what this service holds").selectOption("financial");
     await formWith(page, "category-add").getByRole("button", { name: "Add" }).click();
     await expect(rowFor(page, "financial")).toBeVisible();
 
-    await page.getByLabel("Permission").selectOption("device_access");
+    await selectNamed(page, "Permission").selectOption("device_access");
     await formWith(page, "permissionType").getByRole("button", { name: "Add" }).click();
     await expect(rowFor(page, "Reach your device")).toBeVisible();
 

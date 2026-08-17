@@ -11,6 +11,12 @@ import { AssetFilters, AssetList } from "@/features/assets";
 import { parseAssetQuery, type AssetQuery } from "@/lib/assets/asset-query";
 import { requireVerifiedUser } from "@/server/auth/require-user";
 import { AssetService } from "@/server/assets/asset-service";
+/**
+ * The transitions live beside the route that owns a single asset, and are
+ * imported here because the list offers them too (ATL-036 M5). One definition,
+ * so the detail page and the card cannot drift on what archiving means.
+ */
+import { archiveAssetAction, restoreAssetAction } from "./[id]/actions";
 
 /**
  * Digital Assets list (ATL-031, frontend §6).
@@ -62,6 +68,16 @@ function toQueryInput(params: SearchParams): Record<string, unknown> {
     ...(one(params.sort) ? { sort: one(params.sort) } : {}),
     ...(one(params.cursor) ? { cursor: one(params.cursor) } : {}),
     ...(limit && Number.isFinite(Number(limit)) ? { limit: Number(limit) } : {}),
+    /**
+     * ATL-036: this surface is the *active* asset list, so archived rows are out
+     * of it by default. `parseAssetQuery` turns the flag off the moment the user
+     * picks a status, so selecting `Archived` in the filter still shows them —
+     * the durable path to a restore until ATL-071 builds the Archive page.
+     *
+     * Opted in here rather than defaulted in the parser: `insights/page.tsx`
+     * shares that parser and must keep behaving exactly as it does today.
+     */
+    excludeArchived: true,
   };
 }
 
@@ -152,9 +168,18 @@ export default async function AssetsPage({
           <AssetList
             assets={items}
             isFirstRun={isFirstRun}
+            excludedArchived={query.excludeArchived}
             compact={compact}
             nextCursor={nextCursor}
             queryString={queryString}
+            /*
+              The card archives and restores directly, with no toast: a
+              successful archive revalidates this route and the card leaves the
+              default list, so a toast it owned would unmount with it. The undo
+              affordance lives on the detail page, which stays put.
+            */
+            archive={archiveAssetAction}
+            restore={restoreAssetAction}
           />
         </section>
       </div>

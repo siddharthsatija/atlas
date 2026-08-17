@@ -67,6 +67,23 @@ export function isAssetConfidence(value: string): value is AssetConfidence {
 }
 
 /** Column defaults, mirroring the migration so callers need not restate them. */
+/**
+ * What `markReviewed` writes to `last_verified_at` (ATL-113).
+ *
+ * Not a timestamp, deliberately. The column is checked against the database's
+ * `now()` by `digital_assets_last_verified_not_future`, and a value from this
+ * process's clock compared against that one is a race — it rejected eleven
+ * ordinary reviews in a single local run. `digital_assets_set_review_time`
+ * resolves this sentinel to `now()` inside the same transaction as the check,
+ * so the two can no longer disagree.
+ *
+ * `infinity` because it is always distinct from any stored value, can never be
+ * mistaken for a real observation, and fails closed: without the trigger the
+ * not-future constraint rejects it loudly rather than persisting a review date
+ * that R-001 and ADR-004's freshness factor would then reason from.
+ */
+export const REVIEWED_NOW = "infinity";
+
 export const DEFAULT_ASSET_STATUS: AssetStatus = "active";
 export const DEFAULT_ASSET_SOURCE_TYPE: AssetSourceType = "manual";
 export const DEFAULT_ASSET_CONFIDENCE: AssetConfidence = "medium";

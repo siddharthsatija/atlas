@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { buildSignInPath, isProtectedPath } from "@/lib/auth/return-path";
+import { verifySession } from "@/server/auth/auth-service";
 import {
   SESSION_SEEN_COOKIE,
   SESSION_STARTED_COOKIE,
@@ -128,7 +129,8 @@ async function handleRequest(request: NextRequest, requestHeaders: Headers): Pro
   });
 
   /**
-   * `getUser()`, never `getSession()`.
+   * `getUser()`, never `getSession()` — via `verifySession`, which is the same
+   * call with its three outcomes kept apart (ATL-111).
    *
    * `getSession()` decodes whatever the cookie contains and returns it without
    * contacting the auth server — it is client state, and architecture §5 is
@@ -136,11 +138,28 @@ async function handleRequest(request: NextRequest, requestHeaders: Headers): Pro
    * revalidates the token. It also performs the refresh this middleware exists to
    * carry out, so both jobs are done by the same call.
    */
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const check = await verifySession(supabase.auth);
 
-  if (!user) {
+  if (check.status === "unavailable") {
+    /**
+     * The auth server could not be reached (ATL-111).
+     *
+     * Passing through rather than redirecting, because a redirect here would
+     * tell a user with a perfectly good session that they are signed out — on
+     * the strength of a failed network call. Nothing is granted by continuing:
+     * `(product)/layout.tsx` verifies again before any data renders, and it
+     * refuses the same way, so the request still cannot reach protected content
+     * without a confirmed session. What changes is only where the refusal is
+     * reported, and the layout can report it honestly.
+     *
+     * Session-lifetime enforcement is skipped for the same reason it always
+     * has been: it runs only on a confirmed session, and expiring one Atlas has
+     * not verified would be acting on unverified input.
+     */
+    return response;
+  }
+
+  if (check.status === "unauthenticated") {
     return isProtectedPath(request.nextUrl.pathname) ? redirectToSignIn(request) : response;
   }
 

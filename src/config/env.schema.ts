@@ -55,8 +55,25 @@ export const serverEnvSchema = z.object({
   // --- Audit logging (ADR-006) --------------------------------------------
   AUDIT_HMAC_KEY: base64Key(32, "AUDIT_HMAC_KEY"),
 
-  // --- AI provider (security §10) — unused until milestone M7 -------------
+  // --- AI provider (security §10) ------------------------------------------
   ANTHROPIC_API_KEY: z.string().min(1, "ANTHROPIC_API_KEY is required"),
+  /**
+   * Operational kill switch for every AI surface (ATL-052).
+   *
+   * **Defaults to true**, so the flag changes nothing on deploy and exists to
+   * turn AI *off* quickly during an incident. Defaulting to false would silently
+   * disable a P0 feature in every environment that had not set it — including
+   * CI, where the absence would look like a passing test rather than a missing
+   * capability.
+   *
+   * When false the policy layer stops before the consent read, so a disabled
+   * deployment performs no consent lookup, no retrieval and no provider call.
+   * Manual workflows are untouched: nothing outside `src/server/ai` consults it.
+   */
+  AI_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
 
   // --- Rate limiting (architecture §3) ------------------------------------
   // Serverless cannot rate-limit in memory; a shared durable store is required.

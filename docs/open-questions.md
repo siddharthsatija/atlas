@@ -25,12 +25,24 @@ PRD open decision, now answered: demo mode is available **only after account cre
 - No pre-authentication demo surface ships. A stateless variant would need a separate implementation with no user row behind it, and nothing in the MVP depends on it.
 - Consequence for §11.2: every demo score is computed over demo records belonging to a signed-in user, so the "demo and real records never mix" rule stays a per-user query predicate rather than a separate code path.
 
-## OQ-04 · Score fairness for disputed findings
+## OQ-04 · Score fairness for disputed findings — **resolved: correction, not compensation**
 
 `score-v1` keeps a dismissed finding's deduction until the condition clears (prevents score gaming). But a user who dismisses a finding as _incorrect_ stays penalized.
 
 - Options: (a) status quo; (b) a distinct "not applicable" resolution that requires marking the underlying data wrong (thus changing state, which honestly clears the deduction); (c) reduced-weight dismissals.
-- Engineering recommendation: (b) — it preserves score integrity because the user corrects the record rather than waving off the finding. Needs product sign-off before ATL-043.
+- Engineering recommendation: (b) — it preserves score integrity because the user corrects the record rather than waving off the finding.
+
+**Decision (product sign-off, before ATL-043): option (b).** A disputed finding is answered by correcting the record it was computed from, never by discounting the deduction.
+
+The rule this establishes, which every later ticket inherits:
+
+- **A dismissal never improves the score by itself.** `accepted_risk` and `not_relevant` are dismissals and keep the full deduction — accepting a risk does not remove it, and neither does declaring it uninteresting.
+- **`incorrect` is not a dismissal reason at all.** It is a *correction* path: the user is taken to the underlying record, edits the data, and the existing engine re-evaluates. If the corrected data clears the predicate, ATL-102 auto-resolves the finding with `resolved_by = system` and the deduction clears — because the underlying state changed, which is the only thing permitted to move a score.
+- **Option (c) is rejected**, not merely unchosen. Reduced-weight dismissals contradict ADR-004's own rationale ("user actions cannot manipulate score without changing underlying state") and would make undo score-affecting, turning dismiss/undo into a lever the user could operate on their own score without touching their data.
+
+`score-v1` is unchanged by this decision: no new constant, no version bump, no change to the worked example. That is the point of (b) — the fairness mechanism lives in the correction flow and the input hash, not in the scoring model.
+
+**Scope split.** ATL-043 implements `not_relevant` and `accepted_risk` only. The `incorrect` correction path is a dedicated follow-up ticket; until it lands, a disputed finding behaves as under option (a).
 
 ## OQ-05 · Direct email sending timing (existing open decision)
 
@@ -55,3 +67,11 @@ Final choices for transactional email, analytics, error monitoring, and the rate
 ## OQ-10 · Pricing and monetization
 
 The PRD defines no monetization. Not an MVP blocker for a validation launch, but the answer affects Phase 2 scope (connectors and the service directory are costly) and should exist before Phase 2 planning.
+
+## OQ-11 · What makes a finding "verified"
+
+Frontend §8 reserves critical styling for "genuinely critical, **verified** findings" and the design system reserves danger for "verified critical risk", but no document defines verification and `privacy_findings` has no column for it.
+
+- Product decision (ATL-040): **do not overload `confidence` or `source_type` to mean verified.** Confidence is the minimum certainty across a rule's inputs (ADR-001, `confidence.ts`) and `source_type` distinguishes demo data; neither is a statement that a finding was checked.
+- Until an explicit verification model exists, the finding card applies the existing `SeverityBadge` mapping only and adds no additional critical emphasis. The stricter rule ships with the model, not before it.
+- Answering this means deciding what verification would mean — a user confirming the finding is true, a second corroborating source, or something else — and that answer determines whether it is a column, a derived rule, or an ADR.

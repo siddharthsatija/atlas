@@ -12,7 +12,14 @@ import {
 import { isAssetStatus } from "@/lib/assets/asset-fields";
 import { isDataCategory } from "@/lib/assets/data-categories";
 import { isPermissionScope, isPermissionType } from "@/lib/assets/permissions";
-import type { EditAssetState } from "./form-state";
+/**
+ * Shared with the detail page's archive and restore actions (ATL-036), so the
+ * failure vocabulary and the attempt semantics have one definition rather than
+ * two free to drift.
+ */
+import { rejected, text, toActionState } from "../asset-action-state";
+import type { AssetActionState, EditAssetState } from "./form-state";
+import type { AssetResult } from "@/server/assets/asset-service";
 
 /**
  * Edit-asset Server Actions (ATL-033).
@@ -25,18 +32,6 @@ import type { EditAssetState } from "./form-state";
  * Every action takes the user id from `requireVerifiedUser`, never from the
  * form (architecture §10), and the service re-checks ownership underneath.
  */
-
-/**
- * Reads one field as text.
- *
- * `FormData.get` returns `string | File`, and a `File` stringifies to
- * `[object File]` — which would sail through as a plausible-looking id. Anything
- * that is not a string is treated as absent.
- */
-function text(formData: FormData, name: string): string {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : "";
-}
 
 /** Saves the metadata fields. Deliberately cannot touch status or the review date. */
 export async function saveAssetAction(
@@ -82,49 +77,102 @@ export async function saveAssetAction(
  * with the undo affordance and the copy explaining it is not deletion from the
  * external service.
  */
-export async function setAssetStatusAction(formData: FormData): Promise<void> {
+export async function setAssetStatusAction(
+  previous: AssetActionState,
+  formData: FormData,
+): Promise<AssetActionState> {
   const user = await requireVerifiedUser();
   const assetId = text(formData, "assetId");
   const status = text(formData, "status");
 
-  if (!isAssetStatus(status) || status === "archived") return;
+  // Was a silent `return`, which rendered as a button that did nothing. Only a
+  // tampered or stale form can reach it, and it still deserves an answer.
+  if (!isAssetStatus(status) || status === "archived") return rejected(previous);
 
-  await AssetService.create().setAssetStatus(user.id, assetId, status);
-  revalidatePath(`/assets/${assetId}`);
+  const result = await AssetService.create().setAssetStatus(user.id, assetId, status);
+  return toActionState(previous, result, assetId);
 }
 
-/** Records an explicit review. The only thing that moves `last_verified_at`. */
-export async function markReviewedAction(formData: FormData): Promise<void> {
+/**
+ * Records an explicit review. The only thing that moves `last_verified_at`.
+ *
+ * `last_verified_at` feeds R-001 and ADR-004's freshness factor, so a review
+ * that silently failed did not merely disappoint the user — it left the score
+ * and the findings engine reasoning about a date the user believes they
+ * updated.
+ */
+export async function markReviewedAction(
+  previous: AssetActionState,
+  formData: FormData,
+): Promise<AssetActionState> {
   const user = await requireVerifiedUser();
   const assetId = text(formData, "assetId");
 
-  await AssetService.create().markReviewed(user.id, assetId);
-  revalidatePath(`/assets/${assetId}`);
+  const result = await AssetService.create().markReviewed(user.id, assetId);
+  return toActionState(previous, result, assetId);
 }
 
 /** Adds or removes what the service stores about the user, and what it may do. */
-export async function editAssetChildrenAction(formData: FormData): Promise<void> {
+export async function editAssetChildrenAction(
+  previous: AssetActionState,
+  formData: FormData,
+): Promise<AssetActionState> {
   const user = await requireVerifiedUser();
   const service = AssetService.create();
   const assetId = text(formData, "assetId");
   const intent = text(formData, "intent");
 
+  const result = await runChildIntent(service, user.id, assetId, intent, formData);
+
+  return result === null ? rejected(previous) : toActionState(previous, result, assetId);
+}
+
+/**
+ * Dispatches one child operation, or `null` when the submission is not one of
+ * the five this form can make.
+ *
+ * Split out so the action above has a single place where a result is inspected.
+ * Previously each branch called the service and threw its result away, which is
+ * five copies of the same defect rather than one.
+ */
+async function runChildIntent(
+  service: AssetService,
+  userId: string,
+  assetId: string,
+  intent: string,
+  formData: FormData,
+): Promise<AssetResult<unknown> | null> {
   if (intent === "add-category") {
     const category = text(formData, "category");
-    if (isDataCategory(category)) await service.addDataCategory(user.id, assetId, category);
-  } else if (intent === "remove-category") {
-    await service.removeDataCategory(user.id, assetId, text(formData, "categoryId"));
-  } else if (intent === "add-permission") {
-    const permissionType = text(formData, "permissionType");
-    const scope = text(formData, "scope");
-    if (isPermissionType(permissionType) && isPermissionScope(scope)) {
-      await service.addPermission(user.id, assetId, permissionType, scope);
-    }
-  } else if (intent === "revoke-permission") {
-    await service.setPermissionStatus(user.id, assetId, text(formData, "permissionId"), "revoked");
-  } else if (intent === "remove-permission") {
-    await service.removePermission(user.id, assetId, text(formData, "permissionId"));
+    return isDataCategory(category)
+      ? await service.addDataCategory(userId, assetId, category)
+      : null;
   }
 
-  revalidatePath(`/assets/${assetId}`);
+  if (intent === "remove-category") {
+    return await service.removeDataCategory(userId, assetId, text(formData, "categoryId"));
+  }
+
+  if (intent === "add-permission") {
+    const permissionType = text(formData, "permissionType");
+    const scope = text(formData, "scope");
+    return isPermissionType(permissionType) && isPermissionScope(scope)
+      ? await service.addPermission(userId, assetId, permissionType, scope)
+      : null;
+  }
+
+  if (intent === "revoke-permission") {
+    return await service.setPermissionStatus(
+      userId,
+      assetId,
+      text(formData, "permissionId"),
+      "revoked",
+    );
+  }
+
+  if (intent === "remove-permission") {
+    return await service.removePermission(userId, assetId, text(formData, "permissionId"));
+  }
+
+  return null;
 }

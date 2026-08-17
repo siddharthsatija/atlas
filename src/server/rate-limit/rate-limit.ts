@@ -59,10 +59,11 @@ const FIFTEEN_MINUTES = 15 * 60;
  * links per fifteen minutes leaves a user who mistypes their address or loses an
  * email plenty of room, while making inbox bombing and enumeration expensive.
  *
- * Surfaces named by ATL-086 that do not exist yet — AI (M7), export (M11),
- * request generation (M8) — are deliberately absent. Their policies belong to
- * the tickets that build them; inventing limits for behaviour nobody has written
- * would be guessing at both the load and the threat.
+ * Surfaces named by ATL-086 that do not exist yet — export (M11) and request
+ * generation (M8) — are deliberately absent. Their policies belong to the
+ * tickets that build them; inventing limits for behaviour nobody has written
+ * would be guessing at both the load and the threat. `aiRequest` was added by
+ * ATL-048, the ticket that built the surface it governs.
  */
 export const RATE_LIMIT_POLICIES = {
   /** Magic-link requests. The email-bombing and enumeration surface. */
@@ -71,6 +72,22 @@ export const RATE_LIMIT_POLICIES = {
   authCallback: { name: "auth_callback", max: 10, windowSeconds: FIFTEEN_MINUTES },
   /** First-party client error ingest (ATL-095). Bounded so it cannot be a firehose. */
   monitoringIngest: { name: "monitoring_ingest", max: 60, windowSeconds: 60 },
+  /**
+   * Provider calls through the AI gateway (ATL-048, security §10).
+   *
+   * **Keyed per user only, never per IP.** Every AI call happens inside an
+   * authenticated session, so a user identifier always exists and is the thing
+   * worth bounding: an IP key would throttle a shared office or a VPN exit as if
+   * it were one person, while doing nothing extra against a signed-in caller.
+   *
+   * Twenty per five minutes is chosen, not derived — no document specifies a
+   * number. It is set against what a person can plausibly consume: an assistant
+   * answer takes seconds to read, so twenty in five minutes leaves an engaged
+   * user unimpeded while capping the spend of a stuck client loop at a rate the
+   * provider bill can absorb. Per-environment overrides apply as they do to
+   * every other policy.
+   */
+  aiRequest: { name: "ai_request", max: 20, windowSeconds: 5 * 60 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
 export type RateLimitPolicyName = keyof typeof RATE_LIMIT_POLICIES;

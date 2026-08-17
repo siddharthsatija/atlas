@@ -30,6 +30,25 @@ port = 54323
 enabled = true
 port = 54324
 
+# GoTrue database pool — NOT CONFIGURABLE HERE (#132).
+#
+# The CLI (2.110.0) exposes no `auth.*` key for GoTrue's Postgres connection
+# pool. The only pool-shaped keys in the schema are `db.pooler.*`, which
+# configure the Supavisor listener used by external clients; GoTrue bypasses it
+# and dials Postgres directly, so raising them changes nothing.
+#
+# With `GOTRUE_DB_MAX_POOL_SIZE` and `GOTRUE_DB_MAX_IDLE_POOL_SIZE` unset, the
+# container reports `limit_max_open_conns=0` and `limit_max_idle_conns=0`:
+# unlimited connections, none retained. Every request opens and closes a socket,
+# each close holds a TIME_WAIT entry for 60s against one fixed destination, and
+# a full E2E run drains the auth container's ~28k ephemeral source ports until
+# connect(2) returns EADDRNOTAVAIL — surfacing as HTTP 500 from /auth/v1/user.
+#
+# The pool is therefore applied by recreating the auth container after start:
+#   pnpm db:auth-pool          (chained into `pnpm db:start`)
+#   pnpm db:auth-pool:check    (verify only)
+# Values and rationale: scripts/lib/auth-pool-config.ts.
+
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
@@ -60,7 +79,23 @@ verify_enabled = true
 [auth.rate_limit]
 # Defense in depth: application-level limits are enforced separately via the shared
 # durable store (ATL-086), since serverless cannot rate-limit in memory.
-email_sent = 10
+#
+# `email_sent` is a LOCAL DEVELOPMENT value and governs nothing in production —
+# hosted projects carry their own limits, and ATL-086's application policy
+# (`RATE_LIMIT_POLICIES.signIn`, 5 per 15 minutes) is unchanged and is what
+# actually protects the product.
+#
+# Raised from 10 because it was silently failing the E2E suite. A full Playwright
+# run performs about 19 magic-link sends — one for `auth.setup`, fifteen for the
+# onboarding spec across three viewport projects, and three for the cross-user
+# authorization test. Past ten, GoTrue refuses to send, `signInWithMagicLink`
+# maps the refusal to `unavailable`, and the sign-in page correctly reports
+# "Sign-in is unavailable". A trace showed exactly that: no mail, no callback,
+# and a test failing on a message the product was right to display.
+#
+# 60 leaves headroom for reruns and for tickets that add sign-in journeys,
+# without being so high that a genuine send loop goes unnoticed locally.
+email_sent = 60
 sign_in_sign_ups = 30
 token_verifications = 30
 

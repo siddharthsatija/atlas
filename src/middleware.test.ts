@@ -55,6 +55,11 @@ function signedOut() {
   getUser.mockResolvedValue({ data: { user: null }, error: null });
 }
 
+/** The auth server could not be reached: no verdict on the session (ATL-111). */
+function providerUnavailable() {
+  getUser.mockRejectedValue(new Error("ECONNREFUSED"));
+}
+
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://project.supabase.co");
   vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon-fixture");
@@ -136,6 +141,102 @@ describe("failure modes", () => {
 
     const response = await middleware(requestFor("/"));
     expect(response.headers.get("location")).toBeNull();
+  });
+});
+
+describe("an unreachable auth provider (ATL-111)", () => {
+  /**
+   * The failure this ticket removes. A provider outage used to be
+   * indistinguishable from "no session", so middleware bounced signed-in users
+   * to `/sign-in` on the strength of a failed network call — and the layout
+   * then did it again.
+   *
+   * Passing through is not a grant. `(product)/layout.tsx` verifies again
+   * before any data renders and refuses the same way; what moves is only where
+   * the refusal is reported, so it can be reported honestly.
+   */
+
+  it("does not redirect a protected route to sign-in", async () => {
+    providerUnavailable();
+
+    const response = await middleware(requestFor("/assets"));
+
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it.each([...NAV_ORDER])("does not redirect /%s", async (segment) => {
+    providerUnavailable();
+
+    const response = await middleware(requestFor(`/${segment}`));
+
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("treats a returned transport error the same as a thrown one", async () => {
+    // supabase-js reports a network failure as a returned AuthRetryableFetchError
+    // rather than by throwing. Both mean the same thing and must behave alike.
+    getUser.mockResolvedValue({
+      data: { user: null },
+      error: { name: "AuthRetryableFetchError" },
+    });
+
+    const response = await middleware(requestFor("/assets"));
+
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it.each([429, 500, 503])("does not redirect when the provider answers %i", async (status) => {
+    getUser.mockResolvedValue({ data: { user: null }, error: { status } });
+
+    const response = await middleware(requestFor("/assets"));
+
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("still redirects when the provider gives a verdict", async () => {
+    // A 401 is an answer, not a failure to answer. Genuine sign-outs are
+    // untouched by this change.
+    getUser.mockResolvedValue({ data: { user: null }, error: { status: 401 } });
+
+    const response = await middleware(requestFor("/assets"));
+
+    expect(new URL(response.headers.get("location") ?? "").pathname).toBe("/sign-in");
+  });
+
+  it("does not clear the session markers", async () => {
+    /**
+     * The cookies are the user's session. Clearing them during an outage would
+     * turn a temporary inability to check into a real sign-out that survives
+     * the provider recovering.
+     */
+    providerUnavailable();
+
+    const response = await middleware(
+      requestFor("/assets", sessionMarkers(1 * 60 * 60 * 1000, 60 * 1000)),
+    );
+
+    expect(response.cookies.get("atlas.session.started")).toBeUndefined();
+    expect(response.cookies.get("atlas.session.seen")).toBeUndefined();
+  });
+
+  it("does not revoke the provider session", async () => {
+    // Session-lifetime enforcement runs only on a confirmed session, and an
+    // unconfirmed one must not be expired on unverified input.
+    providerUnavailable();
+
+    await middleware(requestFor("/assets", sessionMarkers(120 * 24 * 60 * 60 * 1000, 60 * 1000)));
+
+    expect(signOutMock).not.toHaveBeenCalled();
+  });
+
+  it("still applies the security headers", async () => {
+    // Every response this middleware can produce carries the policy (ATL-087),
+    // and the pass-through is now one more of them.
+    providerUnavailable();
+
+    const response = await middleware(requestFor("/assets"));
+
+    expect(response.headers.get("content-security-policy")).toContain("default-src");
   });
 });
 

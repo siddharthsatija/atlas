@@ -6,7 +6,19 @@
  * layout inside this folder can change without touching a caller.
  */
 
+export { AccountIdentifier, type AccountIdentifierProps } from "./account-identifier";
+export {
+  AssetActionForm,
+  type AssetActionFormProps,
+  type AssetActionFormState,
+} from "./asset-action-form";
 export { AssetCard, type AssetSummary } from "./asset-card";
+/** ATL-034's detail surface. The route composes these; the order lives inside. */
+export {
+  AssetDetailHeaderActions,
+  type AssetDetailHeaderActionsProps,
+} from "./asset-detail-header";
+export { AssetDetailSections, type AssetDetailSectionsProps } from "./asset-detail-sections";
 export { AssetCreateForm, type AssetCreateFormProps } from "./asset-create-form";
 export { AssetEditForm, type AssetEditFormProps } from "./asset-edit-form";
 export { AssetFilters } from "./asset-filters";

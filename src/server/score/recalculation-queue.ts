@@ -1,6 +1,7 @@
 import "server-only";
 
 import { logger } from "@/lib/telemetry/logger";
+import { PrivacyScoreService } from "./privacy-score-service";
 
 /**
  * The privacy-score recalculation seam (ATL-032, ADR-004, architecture §11.2
@@ -38,7 +39,18 @@ export interface ScoreRecalculationRequest {
    * a real implementation can recompute only the affected one rather than all
    * six.
    */
-  reason: "asset.created" | "asset.updated" | "asset.archived" | "asset.restored" | "asset.deleted";
+  reason:
+    | "asset.created"
+    | "asset.updated"
+    | "asset.archived"
+    | "asset.restored"
+    | "asset.deleted"
+    /**
+     * A finding opened or auto-resolved (ATL-101). §11.2 lists "finding state
+     * changes" among the recalculation triggers; the vocabulary predates
+     * findings existing, so this is the value that trigger needed.
+     */
+    | "finding.changed";
 }
 
 export interface ScoreRecalculationQueue {
@@ -63,5 +75,58 @@ export class NoopScoreRecalculationQueue implements ScoreRecalculationQueue {
       providerAvailable: false,
     });
     return Promise.resolve();
+  }
+}
+
+/**
+ * The real implementation (ATL-045).
+ *
+ * Recalculates in-process: `enqueue` computes the user's score and records a
+ * snapshot **only if it changed**, returning when that is done. No queue table,
+ * no runner, no transport — none is specified anywhere, and ATL-101 answered the
+ * same question the same way for the findings engine.
+ *
+ * That is safe here for the same reason it was safe there, and a stronger one:
+ * the calculation is a pure function of the user's records, so a duplicate call
+ * computes an identical result and the write-on-change rule turns it into a
+ * no-op. Running twice cannot produce two rows for one change.
+ *
+ * The honest cost: this runs inside the request that mutated the record — four
+ * reads plus, at most, one insert. Every call site already wraps `enqueue` in
+ * its own try/catch and logs `score.recalculation_enqueue_failed`, so a failure
+ * here degrades to a stale score rather than a failed mutation. That is
+ * deliberate: a user's edit must not be lost because a derived number could not
+ * be updated.
+ *
+ * When a scheduling ticket introduces a real transport, this class becomes its
+ * producer and no call site changes.
+ */
+export class SnapshotScoreRecalculationQueue implements ScoreRecalculationQueue {
+  private readonly score: PrivacyScoreService;
+
+  constructor(score: PrivacyScoreService) {
+    this.score = score;
+  }
+
+  static create(): SnapshotScoreRecalculationQueue {
+    return new SnapshotScoreRecalculationQueue(PrivacyScoreService.create());
+  }
+
+  async enqueue(request: ScoreRecalculationRequest): Promise<void> {
+    const result = await this.score.createSnapshot(request.userId, request.reason);
+
+    /**
+     * Reported rather than thrown. The caller's catch already keeps the user's
+     * mutation intact, and §14 requires jobs to be observable — a recalculation
+     * that failed silently is exactly what someone would look for when a score
+     * stops moving. No user id and no score value: architecture §10.
+     */
+    if (!result.ok) {
+      logger.error("score.recalculation_failed", {
+        operation: request.reason,
+        provider: "database",
+        providerAvailable: false,
+      });
+    }
   }
 }

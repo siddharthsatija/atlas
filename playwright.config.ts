@@ -16,10 +16,28 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  // `exactOptionalPropertyTypes` forbids assigning undefined to an optional property,
-  // so the key is omitted entirely rather than set to undefined (Playwright then
-  // applies its own default of half the available cores).
-  ...(process.env.CI ? { workers: 2 } : {}),
+  /**
+   * Two workers everywhere, not just CI.
+   *
+   * Playwright's default is half the available cores — 5 on this hardware — and
+   * at 5 the local Supabase stack intermittently fails to serve `getUser()`:
+   * GoTrue cannot open a socket to Postgres (`connect: cannot assign requested
+   * address`), returns 500, and ATL-111 correctly reports an auth outage rather
+   * than pretending the user is signed out. Measured back to back on the same
+   * commit: 5 workers → 5 failures and 8 `auth.provider_unavailable` events
+   * inside 250ms; 2 workers → 236 passed, zero.
+   *
+   * A bound rather than a retry, because the suite is not flaky — the stack is
+   * saturated, and a retry would hide that. It costs nothing: 1.4m at 2 workers
+   * against 1.5m at 5, since the bottleneck was queueing rather than
+   * parallelism.
+   *
+   * This bounds the *harness*. No product behaviour, no timeout, no assertion,
+   * and no provider configuration changes with it. Setting it unconditionally
+   * also retires the `exactOptionalPropertyTypes` spread that used to be needed
+   * to leave the key absent outside CI.
+   */
+  workers: 2,
   reporter: process.env.CI
     ? [["github"], ["html", { open: "never" }], ["list"]]
     : [["html", { open: "never" }], ["list"]],

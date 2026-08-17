@@ -47,6 +47,46 @@ export function AssetsFirstRunEmptyState() {
 }
 
 /**
+ * The default list is empty, and archived assets were excluded from it (ATL-036).
+ *
+ * ## Why this is a third state rather than a reuse
+ *
+ * The first-run state says "no services yet", which is false for someone whose
+ * only services are archived — and telling them that would read as data loss,
+ * the same failure the filtered state exists to avoid. The filtered state is
+ * equally wrong: they did not filter anything.
+ *
+ * ## Why it does not distinguish the two cases
+ *
+ * "Zero assets ever" and "only archived assets" are different situations, and
+ * separating them would cost a second database read purely to choose copy.
+ * ATL-036 declined that, so this wording is true of both: it offers the action a
+ * new user needs and names the filter an archiving user needs, without asserting
+ * which of them is reading it.
+ */
+export function AssetsNoActiveEmptyState() {
+  return (
+    <EmptyState
+      variant="first-run"
+      icon={DatabaseIcon}
+      title="No active services to show."
+      description="Add a service, or use the Archived status filter to view archived services."
+      action={
+        <Button asChild>
+          <Link href="/assets/new">Add a service</Link>
+        </Button>
+      }
+      secondaryAction={
+        /** The same URL the status filter produces, so it is linkable and typed. */
+        <Button asChild variant="tertiary">
+          <Link href="/assets?status=archived">View archived services</Link>
+        </Button>
+      }
+    />
+  );
+}
+
+/**
  * Assets exist, but none match the current filters.
  *
  * The primary action clears them — a plain link back to the unfiltered route, so

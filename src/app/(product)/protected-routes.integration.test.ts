@@ -53,6 +53,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { default: ProductLayout } = await import("./layout");
+const { AuthProviderUnavailableError } = await import("@/server/auth/require-user");
 const { setSidebarCollapsed } = await import("./actions");
 
 function signedIn() {
@@ -111,16 +112,58 @@ describe("ProductLayout", () => {
     expect(getUser).toHaveBeenCalled();
   });
 
-  it("treats a provider error as unauthenticated", async () => {
-    // Fail closed: an auth server that cannot confirm the token has not
-    // confirmed it.
-    getUser.mockResolvedValue({ data: { user: null }, error: { code: "bad_jwt" } });
+  it("signs out a user the provider rejects", async () => {
+    // A 401 is the auth server giving a verdict: this token is not good. That
+    // is a genuine sign-out and must keep redirecting.
+    getUser.mockResolvedValue({
+      data: { user: null },
+      error: { code: "bad_jwt", status: 401 },
+    });
+
     expect(await redirectTargetOf(() => ProductLayout({ children: null }))).toBe("/sign-in");
   });
 
-  it("treats an unreachable provider as unauthenticated", async () => {
+  it("does not sign out a user when the provider is unreachable (ATL-111)", async () => {
+    /**
+     * The defect this ticket exists for. A transport failure says nothing about
+     * the session, and redirecting on it told signed-in users a falsehood — and
+     * cost them the page they were on.
+     *
+     * Still a refusal: the layout throws, so nothing below it renders and no
+     * unverified token becomes authorization evidence.
+     */
     getUser.mockRejectedValue(new Error("ECONNREFUSED"));
-    expect(await redirectTargetOf(() => ProductLayout({ children: null }))).toBe("/sign-in");
+
+    await expect(ProductLayout({ children: null })).rejects.toThrow(AuthProviderUnavailableError);
+    // And specifically not a redirect: `redirect()` throws too, so asserting
+    // "it threw" alone would pass even if it were still sending users away.
+    await expect(ProductLayout({ children: null })).rejects.not.toBeInstanceOf(RedirectSignal);
+  });
+
+  it("treats a rate-limited check as unreachable, not as a sign-out", async () => {
+    // 429 is the provider declining to answer. Nothing about the session is
+    // known, so nothing about the session may be claimed.
+    getUser.mockResolvedValue({
+      data: { user: null },
+      error: { code: "over_request_rate_limit", status: 429 },
+    });
+
+    await expect(ProductLayout({ children: null })).rejects.toThrow(AuthProviderUnavailableError);
+  });
+
+  it("treats a provider outage as unreachable", async () => {
+    getUser.mockResolvedValue({ data: { user: null }, error: { status: 503 } });
+
+    await expect(ProductLayout({ children: null })).rejects.toThrow(AuthProviderUnavailableError);
+  });
+
+  it("renders nothing at all when the provider is unreachable", async () => {
+    // The refusal has to come before any data access, exactly as the redirect
+    // does — an outage must not become a half-rendered protected page.
+    getUser.mockRejectedValue(new Error("ECONNREFUSED"));
+
+    await expect(ProductLayout({ children: null })).rejects.toThrow();
+    expect(cookieStore.get).not.toHaveBeenCalled();
   });
 });
 

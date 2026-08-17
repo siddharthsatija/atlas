@@ -1,11 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   completeAuthCallback,
   getVerifiedUser,
+  verifySession,
   signInWithGoogle,
   signInWithMagicLink,
   type AuthClient,
 } from "./auth-service";
+import { setLogSink, type LogRecord } from "@/lib/telemetry/logger";
 
 /**
  * ATL-011 — authentication operations.
@@ -227,5 +229,183 @@ describe("getVerifiedUser", () => {
   it("returns null rather than throwing when the provider is unreachable", async () => {
     const auth = authDouble({ getUser: vi.fn().mockRejectedValue(new Error("offline")) });
     expect(await getVerifiedUser(auth)).toBeNull();
+  });
+});
+
+describe("verifySession (ATL-111)", () => {
+  /**
+   * The three-way distinction this ticket added. `getVerifiedUser` above still
+   * answers "the user or nothing", which is all some callers need; what changed
+   * is that "nothing" is no longer the only alternative on offer, because
+   * "the provider said no" and "the provider did not answer" are different
+   * facts and only one of them justifies signing somebody out.
+   */
+
+  it("reports an authenticated session with its user", async () => {
+    expect(await verifySession(authDouble())).toEqual({
+      status: "authenticated",
+      user: { id: "user-1" },
+    });
+  });
+
+  it("reports no session when the provider plainly says there is none", async () => {
+    const auth = authDouble({
+      getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }),
+    });
+
+    expect(await verifySession(auth)).toEqual({ status: "unauthenticated" });
+  });
+
+  it.each([400, 401, 403, 404])(
+    "reports no session when the provider answers %i",
+    async (status) => {
+      // A 4xx is a verdict on this token. Genuine sign-outs must keep redirecting.
+      const auth = authDouble({
+        getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: { status } }),
+      });
+
+      expect(await verifySession(auth)).toEqual({ status: "unauthenticated" });
+    },
+  );
+
+  it.each([429, 500, 502, 503, 504])("reports the provider unavailable on %i", async (status) => {
+    const auth = authDouble({
+      getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: { status } }),
+    });
+
+    expect(await verifySession(auth)).toEqual({ status: "unavailable" });
+  });
+
+  it("reports the provider unavailable when the call throws", async () => {
+    // supabase-js usually returns a retryable error rather than throwing, but a
+    // DNS failure or an aborted request still can — and a catch that answered
+    // "no session" would reintroduce the whole defect quietly.
+    const auth = authDouble({ getUser: vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) });
+
+    expect(await verifySession(auth)).toEqual({ status: "unavailable" });
+  });
+
+  it("reports the provider unavailable when the failure carries no status", async () => {
+    // A transport error has no HTTP status because no response arrived. That
+    // absence is the signal, not a gap to guess at.
+    const auth = authDouble({
+      getUser: vi
+        .fn()
+        .mockResolvedValue({ data: { user: null }, error: { name: "AuthRetryableFetchError" } }),
+    });
+
+    expect(await verifySession(auth)).toEqual({ status: "unavailable" });
+  });
+
+  /**
+   * The diagnosis, not the decision.
+   *
+   * `unavailable` covers three different situations — the provider throttled us,
+   * the provider failed, or the request never reached it — and until now the log
+   * said only "unavailable" for all three. These assert the class is recorded,
+   * and that the record still carries nothing from the error itself.
+   *
+   * Classification is deliberately unchanged: every one of these still returns
+   * exactly the status it returned before.
+   */
+  describe("what is recorded when no verdict was reached", () => {
+    const captureLogs = (): LogRecord[] => {
+      const records: LogRecord[] = [];
+      const previous = setLogSink((record) => records.push(record));
+      restoreSink = () => setLogSink(previous);
+      return records;
+    };
+
+    let restoreSink: (() => void) | null = null;
+
+    afterEach(() => {
+      restoreSink?.();
+      restoreSink = null;
+    });
+
+    it.each([429, 500, 503])("records status %i and still reports unavailable", async (status) => {
+      const records = captureLogs();
+      const auth = authDouble({
+        getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: { status } }),
+      });
+
+      expect(await verifySession(auth)).toEqual({ status: "unavailable" });
+
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        event: "auth.verify_unavailable",
+        operation: "auth.session",
+        provider: "auth",
+        providerAvailable: false,
+        status,
+        errorCode: `PROVIDER_STATUS_${status}`,
+      });
+    });
+
+    it("records `none` when the failure carries no status", async () => {
+      const records = captureLogs();
+      const auth = authDouble({
+        getUser: vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:54321")),
+      });
+
+      expect(await verifySession(auth)).toEqual({ status: "unavailable" });
+
+      expect(records[0]).toMatchObject({ errorCode: "PROVIDER_STATUS_NONE" });
+      /** No response arrived, so there is no status to report. */
+      expect(records[0]?.status).toBeUndefined();
+    });
+
+    it.each([400, 401, 403])("records nothing for %i, which is a verdict", async (status) => {
+      // A 4xx redirects. It is an ordinary sign-out, not an outage, and logging
+      // it would turn every signed-out visitor into an error line.
+      const records = captureLogs();
+      const auth = authDouble({
+        getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: { status } }),
+      });
+
+      expect(await verifySession(auth)).toEqual({ status: "unauthenticated" });
+      expect(records).toHaveLength(0);
+    });
+
+    it("carries nothing from the error itself", async () => {
+      /**
+       * The error message here contains a host and port, and a real one could
+       * carry a token or an address. The log must show neither it nor anything
+       * derived from it.
+       */
+      const records = captureLogs();
+      const auth = authDouble({
+        getUser: vi.fn().mockRejectedValue(
+          Object.assign(new Error("token eyJhbGciOi... for user@example.com"), {
+            body: { access_token: "secret" },
+          }),
+        ),
+      });
+
+      await verifySession(auth);
+
+      const serialised = JSON.stringify(records[0]);
+      expect(serialised).not.toContain("eyJhbGciOi");
+      expect(serialised).not.toContain("user@example.com");
+      expect(serialised).not.toContain("secret");
+      expect(serialised).not.toContain("access_token");
+    });
+  });
+
+  it("never returns a user on either failing branch", async () => {
+    // The type already forbids it; this is the runtime statement of the same
+    // rule, because it is the one that would matter if it were ever wrong.
+    for (const getUser of [
+      vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: { status: 401 } }),
+      vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: { status: 503 } }),
+    ]) {
+      expect(await verifySession(authDouble({ getUser }))).not.toHaveProperty("user");
+    }
+  });
+
+  it("still revalidates with the auth server", async () => {
+    const auth = authDouble();
+    await verifySession(auth);
+    expect(auth.getUser).toHaveBeenCalled();
   });
 });

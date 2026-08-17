@@ -1412,6 +1412,45 @@ A ticket is done only when acceptance criteria pass, authorization and validatio
 
 **Testing:** enrollment/challenge/recovery flow tests; audit assertions.
 
+### ATL-114 · Timeline keyset pagination as a true index seek
+
+**Epic:** Activity · **Priority:** P2 · **Complexity:** M · **Depends on:** ATL-068, ATL-070
+
+**Objective:** Replace the disjunctive cursor predicate in `ActivityEventRepository.timeline` with a row comparison, so the cursor becomes an index seek instead of a filter. Requires a SQL function, because PostgREST cannot express a row comparison.
+
+**Why this is not a one-line query change**
+
+`activity-event-repository.ts:146` sends the cursor as `or(occurred_at.lt.X, and(occurred_at.eq.X, id.lt.Y))`. That is a disjunction, and `A OR B` is not a range, so PostgreSQL cannot use it as a btree boundary. Two consequences, both measured on PostgreSQL 17.10 against `activity_events_timeline_idx (user_id, occurred_at desc, id desc)`:
+
+1. **The plan shape is cost-dependent, not determined.** PostgreSQL may pick an ordered Index Scan with `Index Cond: (user_id = $1)` and the disjunction as a `Filter`, or a `BitmapOr` of the two disjuncts followed by `Bitmap Heap Scan` and an explicit `Sort` — the bitmap returns rows in heap order, so the ordering has to be recomputed. Identical 12,000-row tables chose the ordered scan at 12 users x 1000 rows and the bitmap at 40 users x 300 rows. The flip is driven by the planner's estimate of how many rows the filter rejects, and that estimate is wrong by construction: a cursor is perfectly correlated with the sort order, and PostgreSQL has no way to represent that correlation.
+2. **Even the good plan is O(offset).** With the cursor as a `Filter` rather than an `Index Cond`, the scan starts at the newest row every time and discards everything above the cursor. At page 1,000 that walks ~50,000 index entries to return 50.
+
+**The fix**
+
+`(occurred_at, id) < ($2, $3)` is lexicographic and exactly equivalent to the disjunction. Both columns are `NOT NULL`, so row-comparison NULL semantics do not diverge, and both index columns are already `desc`, so the comparison is seekable as written. PostgreSQL compiles it to:
+
+```
+Index Cond: ((user_id = $1) AND (ROW(occurred_at, id) < ROW($2, $3)))
+```
+
+A single range qual — no disjunction, therefore no `BitmapOr` candidate, therefore no `Sort` possible, and the scan starts at the cursor. **The index needs no change; only the query does.**
+
+**Acceptance criteria**
+
+- New migration adds `public.activity_timeline(...)` as `SECURITY INVOKER`, so the RLS posture is unchanged; ownership stays filtered explicitly inside the function, matching today's service-role read path.
+- `timeline()` calls it via `.rpc()` and preserves the existing `ActivityPage` contract, including the limit+1 probe and `nextCursor`.
+- The `EXPLAIN` assertion in `tests/integration/activity-events-rls.test.ts` is restored to forbid `Sort` and tightened to require the row comparison inside `Index Cond` — a structural guarantee rather than a cost-dependent one.
+- Decide whether `forEntity` and the `eventType`-filtered path move behind the same function; they have the same shape.
+
+**Two comments this ticket must correct, which currently overstate the guarantee**
+
+- `activity-event-repository.ts:119` — "The ordering matches `activity_events_timeline_idx` exactly, so this reads the index rather than sorting." True without a cursor; not guaranteed with one.
+- `supabase/migrations/20260805090000_create_activity_events.sql:101` — "Including `id` makes a filtered timeline a pure index scan." True of the `event_type` equality filter it describes; not true of the cursor.
+
+**Interim state on the current branch:** the keyset test asserts that the timeline index is the access path (structural under either shape) plus that the keyset page equals the offset-addressed page it stands in for (behavioural, deterministic). It does not assert the absence of `Sort`, because the current SQL cannot guarantee it. The two non-cursor cases still forbid `Sort` and are unchanged.
+
+**Testing:** plan assertion on `Index Cond`; keyset/offset page-equality across a page boundary with tied `occurred_at`; two-user RLS unchanged.
+
 ---
 
 ## M12 · Quality and launch

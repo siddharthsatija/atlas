@@ -219,3 +219,101 @@ describe("paging", () => {
     expect(toAssetPage([], 10)).toEqual({ items: [], nextCursor: null });
   });
 });
+
+/**
+ * ATL-036 — the default archived exclusion.
+ *
+ * The contract is small and the precedence is the whole of it: a surface opts
+ * in, and an explicit status overrides the opt-in. Everything else about the
+ * query is unchanged, which the cases below assert rather than assume.
+ */
+describe("excludeArchived", () => {
+  it("is off unless a caller asks for it", () => {
+    /**
+     * The property that keeps ATL-036 out of other surfaces. `parseAssetQuery`
+     * is shared with the Insights page's one-row probe, and a default of `true`
+     * would have changed that page without anyone deciding to.
+     */
+    expect(parseAssetQuery({}).query.excludeArchived).toBe(false);
+    expect(parseAssetQuery({ limit: 1 }).query.excludeArchived).toBe(false);
+  });
+
+  it("applies when a caller opts in and asks for no status", () => {
+    const { query } = parseAssetQuery({ excludeArchived: true });
+
+    expect(query.excludeArchived).toBe(true);
+    /** Left undefined, so `isFiltered` still means "the user filtered". */
+    expect(query.status).toBeUndefined();
+  });
+
+  it("yields to an explicit archived filter", () => {
+    const { query } = parseAssetQuery({ excludeArchived: true, status: ["archived"] });
+
+    /**
+     * The durable path to a restore until ATL-071 exists: selecting `Archived`
+     * has to keep working, so the explicit choice wins over the implicit rule.
+     */
+    expect(query.excludeArchived).toBe(false);
+    expect(query.status).toEqual(["archived"]);
+  });
+
+  it("yields to any explicit status, not only archived", () => {
+    const { query } = parseAssetQuery({ excludeArchived: true, status: ["active"] });
+
+    /**
+     * `active` already excludes archived, so the flag would be harmless here —
+     * but leaving it on would mean two predicates expressing one intent, and the
+     * next status added to the vocabulary would have to reason about both.
+     */
+    expect(query.excludeArchived).toBe(false);
+    expect(query.status).toEqual(["active"]);
+  });
+
+  it("yields to a mixed explicit status", () => {
+    const { query } = parseAssetQuery({
+      excludeArchived: true,
+      status: ["active", "inactive"],
+    });
+
+    expect(query.excludeArchived).toBe(false);
+    expect(query.status).toEqual(["active", "inactive"]);
+  });
+
+  it("still applies when the status array is empty", () => {
+    /**
+     * An empty array is "no filter" everywhere else in this contract — clearing
+     * the last chip restores the list rather than emptying it — so it must not
+     * count as an explicit choice here either.
+     */
+    const { query } = parseAssetQuery({ excludeArchived: true, status: [] });
+
+    expect(query.excludeArchived).toBe(true);
+    expect(query.status).toBeUndefined();
+  });
+
+  it("leaves other filters untouched when it applies", () => {
+    const { query } = parseAssetQuery({
+      excludeArchived: true,
+      category: ["finance"],
+      source: ["manual"],
+      search: "bank",
+    });
+
+    expect(query.excludeArchived).toBe(true);
+    expect(query.category).toEqual(["finance"]);
+    expect(query.source).toEqual(["manual"]);
+    expect(query.search).toBe("bank");
+  });
+
+  it("falls back to including everything when the input is rejected", () => {
+    /**
+     * A malformed query already falls back to "all my assets". Excluding
+     * archived on that path would let a bad input quietly hide records, which is
+     * a worse failure than showing more than was asked for.
+     */
+    const { success, query } = parseAssetQuery({ limit: "not-a-number" });
+
+    expect(success).toBe(false);
+    expect(query.excludeArchived).toBe(false);
+  });
+});

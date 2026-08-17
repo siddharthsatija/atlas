@@ -3,6 +3,7 @@ import {
   isPlausibleEmail,
   toCallbackResultCode,
   toMagicLinkResultCode,
+  toSessionCheckStatus,
   type MagicLinkResultCode,
 } from "./auth-result";
 
@@ -135,5 +136,71 @@ describe("toCallbackResultCode", () => {
     // Telling the user their link is invalid when it is fine would send them
     // round the loop generating more links against the same limit.
     expect(toCallbackResultCode({ code: "over_request_rate_limit" })).toBe("unavailable");
+  });
+});
+
+describe("toSessionCheckStatus (ATL-111)", () => {
+  /**
+   * Keyed on HTTP status rather than on Supabase's error-code vocabulary, which
+   * the magic-link mappers above use. The question here is narrower and the
+   * status answers it exactly: did the auth server reach a verdict about this
+   * token, or did it not answer at all?
+   */
+
+  it.each([400, 401, 403, 404, 422])("reads %i as a verdict: no session", (status) => {
+    expect(toSessionCheckStatus({ status })).toBe("unauthenticated");
+  });
+
+  it.each([500, 502, 503, 504])("reads %i as the provider not answering", (status) => {
+    expect(toSessionCheckStatus({ status })).toBe("unavailable");
+  });
+
+  it("reads 429 as the provider declining to answer, not as a sign-out", () => {
+    /**
+     * A rate limit says nothing whatever about the session — and locally it is
+     * the most likely cause, since a full E2E run can exhaust the hourly limits
+     * in `supabase/config.toml`. Treating it as a sign-out is how a signed-in
+     * user ends up looking at a sign-in form.
+     */
+    expect(toSessionCheckStatus({ status: 429 })).toBe("unavailable");
+  });
+
+  it("reads a statusless error as the provider not answering", () => {
+    // A transport failure has no HTTP status because no response arrived.
+    expect(toSessionCheckStatus({ name: "AuthRetryableFetchError" })).toBe("unavailable");
+    expect(toSessionCheckStatus(new Error("ECONNREFUSED"))).toBe("unavailable");
+  });
+
+  it("defaults an unrecognisable failure to unavailable", () => {
+    /**
+     * Both outcomes deny access, so this default cannot weaken anything — the
+     * only difference is what the user is told, and Atlas should not claim
+     * somebody is signed out on evidence it does not have.
+     */
+    for (const error of [undefined, null, "boom", 42, {}, { status: "503" }, { status: NaN }]) {
+      expect(toSessionCheckStatus(error)).toBe("unavailable");
+    }
+  });
+
+  it("survives an error object that throws when read", () => {
+    // The value crosses a provider boundary as `unknown`; a throwing getter
+    // here would surface inside the auth gate itself.
+    const hostile = {
+      get status(): number {
+        throw new Error("no");
+      },
+    };
+
+    expect(toSessionCheckStatus(hostile)).toBe("unavailable");
+  });
+
+  it("never reports authenticated", () => {
+    // The type says so; this is the runtime statement of the same rule. This
+    // function only ever classifies a failure.
+    const statuses = [400, 401, 429, 500, undefined].map((status) =>
+      toSessionCheckStatus({ status }),
+    );
+
+    expect(statuses).not.toContain("authenticated");
   });
 });

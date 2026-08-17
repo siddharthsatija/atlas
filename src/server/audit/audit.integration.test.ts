@@ -518,6 +518,11 @@ describe("event inventory", () => {
       "consent",
       "personal_field",
       "operator",
+      // ATL-042. Added deliberately: ADR-006's inventory is amended to match
+      // the ticket's requirement, rather than the vocabulary being widened
+      // quietly. This assertion is what makes that a decision rather than a
+      // drift.
+      "finding",
     ]) {
       expect(prefixes).toContain(required);
     }

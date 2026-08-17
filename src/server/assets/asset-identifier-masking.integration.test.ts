@@ -156,18 +156,25 @@ describe("the identifier is masked, never returned whole", () => {
     expect(String(stored?.account_identifier_encrypted)).not.toContain("dana.scully");
   });
 
-  it("has no path that returns the plaintext", () => {
+  it("has no unaudited path that returns the plaintext", () => {
     /**
-     * The structural guarantee. `AssetService` exposes exactly one way to obtain
-     * an identifier and it masks before returning — a method that handed back
-     * plaintext "for the caller to mask" is one a future caller renders directly.
-     * Reveal is ATL-035's, and it is an explicit, audited action.
+     * The structural guarantee, as ATL-035 leaves it.
+     *
+     * When this was written the list held one entry, because reveal did not
+     * exist yet and the comment said so. ATL-035 added exactly the method that
+     * comment anticipated: `revealAccountIdentifier`, which writes an audit
+     * event before it returns anything and is covered by
+     * `asset-identifier-reveal.integration.test.ts`.
+     *
+     * The assertion is still exhaustive rather than relaxed — a *third*
+     * identifier method, the unaudited plaintext read added for convenience,
+     * is what it exists to catch.
      */
-    const methods = Object.getOwnPropertyNames(AssetService.prototype).filter((name) =>
-      /identifier/i.test(name),
-    );
+    const methods = Object.getOwnPropertyNames(AssetService.prototype)
+      .filter((name) => /identifier/i.test(name))
+      .sort();
 
-    expect(methods).toEqual(["readMaskedAccountIdentifier"]);
+    expect(methods).toEqual(["readMaskedAccountIdentifier", "revealAccountIdentifier"]);
   });
 });
 

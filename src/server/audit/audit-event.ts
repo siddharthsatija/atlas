@@ -58,6 +58,19 @@ export const AUDIT_EVENT_TYPES = [
   // Sensitive-value reveal (ATL-035)
   "personal_field.revealed",
 
+  /**
+   * Finding resolution (ATL-042).
+   *
+   * ADR-006's MVP inventory did not name it, and the decision to add it was
+   * taken deliberately rather than by widening this list quietly: ATL-042's
+   * acceptance criterion requires an audit event, and the ADR's inventory is
+   * amended to match. Written *after* the status change commits, so the record
+   * describes a resolution that happened rather than one that was attempted.
+   *
+   * The engine's auto-resolution is not audited — nobody acted.
+   */
+  "finding.resolved",
+
   // Operator elevation
   "operator.elevated",
 ] as const;

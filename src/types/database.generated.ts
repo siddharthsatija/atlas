@@ -45,6 +45,57 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_interactions: {
+        Row: {
+          created_at: string
+          feedback_category: string | null
+          helpful: boolean | null
+          id: string
+          input_classification: string | null
+          latency_ms: number
+          model: string
+          output_schema_version: number
+          policy_version: number
+          prompt_version: number
+          purpose: string
+          records_referenced: Json
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          feedback_category?: string | null
+          helpful?: boolean | null
+          id?: string
+          input_classification?: string | null
+          latency_ms: number
+          model: string
+          output_schema_version: number
+          policy_version: number
+          prompt_version: number
+          purpose: string
+          records_referenced?: Json
+          status: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          feedback_category?: string | null
+          helpful?: boolean | null
+          id?: string
+          input_classification?: string | null
+          latency_ms?: number
+          model?: string
+          output_schema_version?: number
+          policy_version?: number
+          prompt_version?: number
+          purpose?: string
+          records_referenced?: Json
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       asset_data_categories: {
         Row: {
           asset_id: string
@@ -291,6 +342,125 @@ export type Database = {
           result_encrypted?: string | null
           result_hash?: string | null
           scope?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      privacy_findings: {
+        Row: {
+          asset_id: string | null
+          confidence: string
+          created_at: string
+          dedup_key: string
+          description: string
+          evidence_refs_json: Json
+          evidence_summary: string
+          finding_type: string
+          id: string
+          input_hash: string | null
+          recommended_action: string
+          resolution_action: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          rule_id: string | null
+          rule_version: string | null
+          severity: string
+          source_reference: string | null
+          source_type: string
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          asset_id?: string | null
+          confidence?: string
+          created_at?: string
+          dedup_key: string
+          description: string
+          evidence_refs_json?: Json
+          evidence_summary: string
+          finding_type: string
+          id?: string
+          input_hash?: string | null
+          recommended_action: string
+          resolution_action?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          rule_id?: string | null
+          rule_version?: string | null
+          severity: string
+          source_reference?: string | null
+          source_type?: string
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          asset_id?: string | null
+          confidence?: string
+          created_at?: string
+          dedup_key?: string
+          description?: string
+          evidence_refs_json?: Json
+          evidence_summary?: string
+          finding_type?: string
+          id?: string
+          input_hash?: string | null
+          recommended_action?: string
+          resolution_action?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          rule_id?: string | null
+          rule_version?: string | null
+          severity?: string
+          source_reference?: string | null
+          source_type?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "privacy_findings_asset_fkey"
+            columns: ["user_id", "asset_id"]
+            isOneToOne: false
+            referencedRelation: "digital_assets"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
+      privacy_score_snapshots: {
+        Row: {
+          factor_breakdown_json: Json
+          id: string
+          is_demo: boolean
+          reason: string
+          recorded_at: string
+          score: number
+          score_version: string
+          user_id: string
+        }
+        Insert: {
+          factor_breakdown_json?: Json
+          id?: string
+          is_demo?: boolean
+          reason: string
+          recorded_at?: string
+          score: number
+          score_version: string
+          user_id: string
+        }
+        Update: {
+          factor_breakdown_json?: Json
+          id?: string
+          is_demo?: boolean
+          reason?: string
+          recorded_at?: string
+          score?: number
+          score_version?: string
           user_id?: string
         }
         Relationships: []

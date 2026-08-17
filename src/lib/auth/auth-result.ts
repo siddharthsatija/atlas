@@ -143,6 +143,73 @@ export function toCallbackResultCode(error: unknown): CallbackResultCode {
 }
 
 /**
+ * What verifying the current session established (ATL-111).
+ *
+ * Three outcomes, because there are three situations and only two were ever
+ * represented:
+ *
+ *   - `authenticated` — the provider confirmed the token.
+ *   - `unauthenticated` — the provider answered, and the answer is no session.
+ *   - `unavailable` — the provider did not answer. Nothing is known about the
+ *     session either way.
+ *
+ * Collapsing the third into the second is what sent signed-in users to
+ * `/sign-in` during a provider outage: Atlas told them they were signed out
+ * when the truth was that it could not check. The distinction exists to be
+ * *reported honestly*, not to relax anything — no caller may render protected
+ * content on `unavailable`, because an unverified token is not authorization
+ * evidence (architecture §5).
+ */
+export type SessionCheckStatus = "authenticated" | "unauthenticated" | "unavailable";
+
+/**
+ * Classifies a `getUser()` failure as "the provider said no" or "the provider
+ * did not say".
+ *
+ * Keyed on **HTTP status**, deliberately, rather than on the error-code
+ * vocabulary the magic-link mappers use. A status is the most stable signal
+ * Supabase exposes and it answers exactly the question being asked: a 4xx is the
+ * auth server giving a definitive verdict on this token, while a 429, a 5xx, or
+ * no status at all means no verdict was reached. Codes churn between provider
+ * releases; the semantics of 401 versus 503 do not.
+ *
+ * The unclassifiable case resolves to `unavailable`. Both outcomes deny access —
+ * neither renders anything — so the default is a question of what the user is
+ * *told*, and claiming "you are signed out" on evidence Atlas does not have is
+ * the failure this whole change exists to remove.
+ */
+export function toSessionCheckStatus(error: unknown): Exclude<SessionCheckStatus, "authenticated"> {
+  const status = readErrorStatus(error);
+
+  // Explicitly not "unauthenticated": 429 is the provider declining to answer.
+  // Local development hits this the moment a test run exhausts an hourly limit.
+  if (status === 429) return "unavailable";
+
+  // A definitive verdict: no session, an expired token, a forged one, or a user
+  // that no longer exists. This is the path a genuinely signed-out request takes.
+  if (status !== undefined && status >= 400 && status < 500) return "unauthenticated";
+
+  return "unavailable";
+}
+
+/**
+ * Reads a Supabase `AuthError.status` without trusting the shape.
+ *
+ * Same defensive reasoning as `readErrorCode`: the value crosses a provider
+ * boundary as `unknown`, and a transport failure arrives as an error object with
+ * no status at all — which is itself the signal that no verdict was reached.
+ */
+export function readErrorStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  try {
+    const status: unknown = (error as { status?: unknown }).status;
+    return typeof status === "number" && Number.isFinite(status) ? status : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Reads a Supabase `AuthError.code` without trusting the shape.
  *
  * Wrapped because this value crosses a provider boundary as `unknown`, and a

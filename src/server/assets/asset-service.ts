@@ -4,15 +4,20 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.generated";
 import { createServiceRoleClient } from "@/server/db/service-role-client";
 import { ActivityWriter } from "@/server/activity/activity-writer";
+import { AuditWriter } from "@/server/audit/audit-writer";
+import { FindingsEngine } from "@/server/findings/findings-engine";
 import {
+  EngineFindingsRecomputeQueue,
   NoopFindingsRecomputeQueue,
   type FindingsRecomputeQueue,
   type RecomputeRequest,
 } from "@/server/findings/recompute-queue";
 import {
   NoopScoreRecalculationQueue,
+  SnapshotScoreRecalculationQueue,
   type ScoreRecalculationQueue,
 } from "@/server/score/recalculation-queue";
+import { PrivacyScoreService } from "@/server/score/privacy-score-service";
 import {
   AssetDataCategoryRepository,
   AssetDataCategoryStoreError,
@@ -28,7 +33,7 @@ import {
   type PermissionScope,
   type PermissionStatus,
 } from "@/lib/assets/permissions";
-import type { AssetStatus } from "@/lib/assets/asset-fields";
+import { REVIEWED_NOW, type AssetStatus } from "@/lib/assets/asset-fields";
 import {
   DigitalAssetRepository,
   DigitalAssetStoreError,
@@ -92,12 +97,23 @@ export class AssetService {
   private readonly activity: ActivityWriter;
   private readonly recompute: FindingsRecomputeQueue;
   private readonly score: ScoreRecalculationQueue;
+  /**
+   * Audit, distinct from activity (ATL-035).
+   *
+   * `ActivityWriter` produces the user-facing timeline; this is the internal,
+   * append-only record ADR-006 defines. Reveal writes here and *not* to the
+   * timeline: §12 lists it as an audited action, and no ATL-069 activity type
+   * describes it. Inventing one would put a new entry on the user's timeline
+   * every time they looked at their own value.
+   */
+  private readonly audit: AuditWriter;
 
   constructor(
     db: SupabaseClient<Database>,
     activity?: ActivityWriter,
     recompute?: FindingsRecomputeQueue,
     score?: ScoreRecalculationQueue,
+    audit?: AuditWriter,
   ) {
     this.assets = new DigitalAssetRepository(db);
     this.categories = new AssetDataCategoryRepository(db);
@@ -105,15 +121,33 @@ export class AssetService {
     this.activity = activity ?? new ActivityWriter(db);
     this.recompute = recompute ?? new NoopFindingsRecomputeQueue();
     this.score = score ?? new NoopScoreRecalculationQueue();
+    this.audit = audit ?? new AuditWriter(db);
   }
 
   static create(): AssetService {
     const db = createServiceRoleClient();
+
+    /**
+     * One queue, given to both this service and the engine it drives (ATL-045).
+     *
+     * The engine is constructed inline here rather than through
+     * `FindingsEngine.create()`, so without passing this explicitly its `score`
+     * parameter would default to `NoopScoreRecalculationQueue` — leaving the
+     * same class behaving differently depending on which construction path
+     * reached it. Sharing the instance is safe: it holds no per-call state.
+     */
+    const score = new SnapshotScoreRecalculationQueue(new PrivacyScoreService(db));
+
     return new AssetService(
       db,
       new ActivityWriter(db),
-      new NoopFindingsRecomputeQueue(),
-      new NoopScoreRecalculationQueue(),
+      // ATL-101: mutations now actually recompute findings. The seam and every
+      // call site are unchanged — only the implementation behind them.
+      new EngineFindingsRecomputeQueue(new FindingsEngine(db, new ActivityWriter(db), score)),
+      // ATL-045: mutations now actually recalculate the score and record a
+      // snapshot when it changed. Same seam, same call sites.
+      score,
+      new AuditWriter(db),
     );
   }
 
@@ -168,6 +202,99 @@ export class AssetService {
     } catch (error) {
       return this.storeFailure("asset.read_identifier", error);
     }
+  }
+
+  /**
+   * The account identifier in full, for a deliberate reveal (ATL-035).
+   *
+   * The only method in Atlas that returns a stored identifier as plaintext, and
+   * the ordering below is the whole point of it:
+   *
+   *  1. Ownership is resolved first, so a foreign or missing asset is refused
+   *     before anything is decrypted.
+   *  2. The audit event is written **and awaited** — `AuditWriter.write` throws
+   *     rather than swallowing — before the value is returned.
+   *  3. Only then does the plaintext leave this method.
+   *
+   * So an unaudited reveal is not a bug that could happen, it is a state this
+   * code cannot reach: if the audit append fails, the `catch` returns
+   * `UNAVAILABLE` and the caller gets no value. Security §12 lists
+   * "sensitive-value reveal actions" among the audited events, and a log whose
+   * absence does not prove the event did not occur is not an audit log
+   * (ADR-006).
+   *
+   * The audit context carries no value and no mask — only the entity reference
+   * and why the reveal happened. `AUDIT_CONTEXT_POLICY` would drop an unlisted
+   * key anyway, but relying on that would mean sending the value and trusting
+   * the filter.
+   */
+  async revealAccountIdentifier(
+    userId: string,
+    assetId: string,
+  ): Promise<AssetResult<string | null>> {
+    try {
+      /**
+       * Existence and ownership resolved together, and answered identically:
+       * a reveal that failed differently for "not yours" than for "no such
+       * asset" would turn this into the same oracle §9 avoids everywhere else.
+       */
+      const asset = await this.assets.find(userId, assetId);
+      if (!asset) return fail("NOT_FOUND");
+
+      const plaintext = await this.assets.readAccountIdentifier(userId, assetId);
+
+      /**
+       * Nothing recorded, nothing revealed — and nothing audited. An audit entry
+       * here would assert that a value was disclosed when none exists.
+       */
+      if (!plaintext) return ok(null);
+
+      await this.audit.write({
+        userId,
+        eventType: "personal_field.revealed",
+        actorType: "user",
+        entityType: "asset",
+        entityId: assetId,
+        // `reason` and `method` are both declared in AUDIT_CONTEXT_POLICY.
+        context: { reason: "user_action", method: "ui" },
+      });
+
+      return ok(plaintext);
+    } catch (error) {
+      return this.revealFailure(error);
+    }
+  }
+
+  /**
+   * Reveal failures, with the audit path separated from the store path.
+   *
+   * `storeFailure` rethrows anything that is not a `DigitalAssetStoreError`,
+   * which is correct for the mutation paths but wrong here: an audit append
+   * that fails must produce a refusal, not an unhandled exception that a
+   * framework error boundary might turn into a page containing who-knows-what.
+   * Either way the caller receives `UNAVAILABLE` and no plaintext.
+   */
+  private revealFailure(error: unknown): AssetResult<string | null> {
+    if (error instanceof DigitalAssetStoreError) {
+      logger.error("asset.store_unavailable", {
+        operation: "asset.reveal_identifier",
+        provider: "database",
+        providerAvailable: false,
+      });
+      return fail("UNAVAILABLE");
+    }
+
+    /**
+     * No error message, no stack, no identifiers. The failure may have come
+     * from the crypto module or the audit chain, and both carry detail that
+     * belongs in neither a log line nor a response.
+     */
+    logger.error("asset.reveal_unaudited", {
+      operation: "asset.reveal_identifier",
+      provider: "audit",
+      providerAvailable: false,
+    });
+    return fail("UNAVAILABLE");
   }
 
   async createAsset(
@@ -295,8 +422,18 @@ export class AssetService {
    */
   async markReviewed(userId: string, assetId: string): Promise<AssetResult<DigitalAssetRecord>> {
     try {
+      /**
+       * `REVIEWED_NOW` rather than a timestamp (ATL-113).
+       *
+       * `last_verified_at` is checked by `digital_assets_last_verified_not_future`
+       * against the database's `now()`. Sending this process's clock made the
+       * two disagree by microseconds and the constraint reject a perfectly
+       * ordinary review — observed eleven times in one local run. The sentinel
+       * carries no clock; `digital_assets_set_review_time` resolves it, so the
+       * value and the constraint judging it come from the same `now()`.
+       */
       const asset = await this.assets.update(userId, assetId, {
-        lastVerifiedAt: new Date().toISOString(),
+        lastVerifiedAt: REVIEWED_NOW,
       });
       if (!asset) return fail("NOT_FOUND");
 

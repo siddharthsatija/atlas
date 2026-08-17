@@ -10,7 +10,7 @@ import {
   PageHeader,
   PageTitle,
 } from "@/components/layout/page-layout";
-import { AssetEditForm } from "@/features/assets";
+import { AssetActionForm, AssetEditForm } from "@/features/assets";
 import { ASSET_STATUSES } from "@/lib/assets/asset-fields";
 import { DATA_CATEGORIES } from "@/lib/assets/data-categories";
 import { PERMISSION_SCOPES, PERMISSION_TYPES } from "@/lib/assets/permissions";
@@ -18,7 +18,7 @@ import { requireVerifiedUser } from "@/server/auth/require-user";
 import { AssetService } from "@/server/assets/asset-service";
 import { editAssetChildrenAction, markReviewedAction, setAssetStatusAction } from "./actions";
 import { saveAssetAction } from "./actions";
-import { INITIAL_EDIT_ASSET_STATE } from "./form-state";
+import { INITIAL_ASSET_ACTION_STATE, INITIAL_EDIT_ASSET_STATE } from "./form-state";
 
 /**
  * Edit a service (ATL-033).
@@ -28,9 +28,10 @@ import { INITIAL_EDIT_ASSET_STATE } from "./form-state";
  * explicit review, and status changes emit their own activity — neither is
  * expressible if everything shares a submit button.
  *
- * Status, review, and the child lists are plain server-rendered forms posting to
- * Server Actions, so they work without client JavaScript. Only the metadata form
- * is a client component, because it validates as you submit.
+ * Status, review, and the child lists post to Server Actions through
+ * `AssetActionForm`, which reports a failure the user would otherwise never see
+ * (ATL-112). Submission still works without client JavaScript — React renders a
+ * real form with a real action; only the error message needs the hook.
  */
 
 export const metadata: Metadata = { title: "Edit service" };
@@ -108,8 +109,13 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
             <h2 className="text-body font-medium text-text-primary">Status and review</h2>
           </CardHeader>
           <CardContent className="flex flex-col gap-6">
-            <form action={setAssetStatusAction} className="flex flex-wrap items-end gap-3">
-              <input type="hidden" name="assetId" value={asset.id} />
+            <AssetActionForm
+              action={setAssetStatusAction}
+              initialState={INITIAL_ASSET_ACTION_STATE}
+              assetId={asset.id}
+              label="Update status"
+              className="flex flex-wrap items-end gap-3"
+            >
               <div className="flex flex-col gap-1">
                 <label htmlFor="status" className="text-body-sm text-text-secondary">
                   Status
@@ -135,10 +141,15 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
                   This service is archived. Restoring it is done from the Archive.
                 </p>
               )}
-            </form>
+            </AssetActionForm>
 
-            <form action={markReviewedAction} className="flex flex-wrap items-center gap-3">
-              <input type="hidden" name="assetId" value={asset.id} />
+            <AssetActionForm
+              action={markReviewedAction}
+              initialState={INITIAL_ASSET_ACTION_STATE}
+              assetId={asset.id}
+              label="Mark as reviewed"
+              className="flex flex-wrap items-center gap-3"
+            >
               <Button type="submit" variant="secondary">
                 Mark as reviewed
               </Button>
@@ -148,7 +159,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
                   : "Never reviewed."}{" "}
                 Saving other changes does not count as a review.
               </p>
-            </form>
+            </AssetActionForm>
           </CardContent>
         </Card>
 
@@ -164,14 +175,18 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
                     <span className="text-body-sm text-text-primary">{entry.category}</span>
                     {entry.sensitivity === "high" && <Badge tone="warning">More sensitive</Badge>}
                   </span>
-                  <form action={editAssetChildrenAction}>
-                    <input type="hidden" name="assetId" value={asset.id} />
+                  <AssetActionForm
+                    action={editAssetChildrenAction}
+                    initialState={INITIAL_ASSET_ACTION_STATE}
+                    assetId={asset.id}
+                    label={`Remove ${entry.category}`}
+                  >
                     <input type="hidden" name="intent" value="remove-category" />
                     <input type="hidden" name="categoryId" value={entry.id} />
                     <Button type="submit" variant="tertiary">
                       Remove
                     </Button>
-                  </form>
+                  </AssetActionForm>
                 </li>
               ))}
               {dataCategories.length === 0 && (
@@ -179,8 +194,13 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
               )}
             </ul>
 
-            <form action={editAssetChildrenAction} className="flex flex-wrap items-end gap-3">
-              <input type="hidden" name="assetId" value={asset.id} />
+            <AssetActionForm
+              action={editAssetChildrenAction}
+              initialState={INITIAL_ASSET_ACTION_STATE}
+              assetId={asset.id}
+              label="Add what this service holds"
+              className="flex flex-wrap items-end gap-3"
+            >
               <input type="hidden" name="intent" value="add-category" />
               <div className="flex flex-col gap-1">
                 <label htmlFor="category-add" className="text-body-sm text-text-secondary">
@@ -201,7 +221,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
               <Button type="submit" variant="secondary">
                 Add
               </Button>
-            </form>
+            </AssetActionForm>
           </CardContent>
         </Card>
 
@@ -224,8 +244,12 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
                   </span>
                   <span className="flex items-center gap-2">
                     {entry.status === "active" && (
-                      <form action={editAssetChildrenAction}>
-                        <input type="hidden" name="assetId" value={asset.id} />
+                      <AssetActionForm
+                        action={editAssetChildrenAction}
+                        initialState={INITIAL_ASSET_ACTION_STATE}
+                        assetId={asset.id}
+                        label={`Revoke ${PERMISSION_LABELS.get(entry.permissionType) ?? entry.permissionType}`}
+                      >
                         <input type="hidden" name="intent" value="revoke-permission" />
                         <input type="hidden" name="permissionId" value={entry.id} />
                         {/*
@@ -235,16 +259,20 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
                         <Button type="submit" variant="tertiary">
                           Revoke
                         </Button>
-                      </form>
+                      </AssetActionForm>
                     )}
-                    <form action={editAssetChildrenAction}>
-                      <input type="hidden" name="assetId" value={asset.id} />
+                    <AssetActionForm
+                      action={editAssetChildrenAction}
+                      initialState={INITIAL_ASSET_ACTION_STATE}
+                      assetId={asset.id}
+                      label={`Remove ${PERMISSION_LABELS.get(entry.permissionType) ?? entry.permissionType}`}
+                    >
                       <input type="hidden" name="intent" value="remove-permission" />
                       <input type="hidden" name="permissionId" value={entry.id} />
                       <Button type="submit" variant="tertiary">
                         Remove
                       </Button>
-                    </form>
+                    </AssetActionForm>
                   </span>
                 </li>
               ))}
@@ -253,8 +281,13 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
               )}
             </ul>
 
-            <form action={editAssetChildrenAction} className="flex flex-wrap items-end gap-3">
-              <input type="hidden" name="assetId" value={asset.id} />
+            <AssetActionForm
+              action={editAssetChildrenAction}
+              initialState={INITIAL_ASSET_ACTION_STATE}
+              assetId={asset.id}
+              label="Add permission"
+              className="flex flex-wrap items-end gap-3"
+            >
               <input type="hidden" name="intent" value="add-permission" />
               <div className="flex flex-col gap-1">
                 <label htmlFor="permissionType" className="text-body-sm text-text-secondary">
@@ -296,7 +329,7 @@ export default async function EditAssetPage({ params }: { params: Promise<{ id: 
               <Button type="submit" variant="secondary">
                 Add
               </Button>
-            </form>
+            </AssetActionForm>
           </CardContent>
         </Card>
       </div>

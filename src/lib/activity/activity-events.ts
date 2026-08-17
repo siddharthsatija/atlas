@@ -23,7 +23,7 @@
  *
  * Only events the documentation already says are emitted are listed:
  * asset mutations and archive/restore (ATL-030, ATL-036), finding resolution,
- * dismissal, and auto-resolution (ATL-043, architecture §11.1), request
+ * dismissal, undo, and auto-resolution (ATL-043, architecture §11.1), request
  * transitions (architecture §13), and consent changes (ATL-078). Each later
  * milestone adds its own — a code change with a reviewer, exactly as the ADR-006
  * audit inventory does.
@@ -87,6 +87,13 @@ export const ACTIVITY_TEMPLATES = {
       : `New finding for ${named(p, "a service")}`,
   "finding.resolved": (p) => `Resolved a finding for ${named(p, "a service")}`,
   "finding.dismissed": (p) => `Dismissed a finding for ${named(p, "a service")}`,
+  /**
+   * Undo (ATL-043). Distinct from `finding.opened`, which announces a *new*
+   * finding — this one returned because the user changed their mind, and a
+   * timeline that said "New finding" for it would be describing something that
+   * did not happen.
+   */
+  "finding.restored": (p) => `Restored a dismissed finding for ${named(p, "a service")}`,
   /** Written by the rules engine when a predicate stops holding. */
   "finding.auto_resolved": (p) =>
     `A finding for ${named(p, "a service")} resolved itself after your changes`,

@@ -52,6 +52,14 @@ jobs:
           # previous commit on main.
           ATLAS_MIGRATION_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
 
+      - name: Prompt validation (append-only)
+        # ATL-051: changing a prompt requires a version bump. Same baseline
+        # resolution as migrations — both enforce "published artefacts are
+        # immutable" and both are useless without the base ref fetched.
+        run: pnpm prompts:verify
+        env:
+          ATLAS_PROMPT_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
+
       - name: CI policy (no production secrets; all §19 gates run on PRs)
         run: pnpm ci:verify-policy
 

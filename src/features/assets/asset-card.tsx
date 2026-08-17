@@ -1,5 +1,8 @@
+"use client";
+
 import { MoreHorizontalIcon } from "lucide-react";
 import Link from "next/link";
+import { startTransition, useActionState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -12,7 +15,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ASSET_CATEGORIES } from "@/lib/assets/categories";
 import type { AssetStatus } from "@/lib/assets/asset-fields";
+import { ARCHIVE_COPY } from "@/lib/assets/archive-copy";
 import { cn } from "@/lib/utils";
+import { ASSET_ACTION_FAILURE_MESSAGES, type AssetActionFormState } from "./asset-action-form";
+import { archivePayload } from "./asset-archive-toast";
 
 /**
  * One asset, as a card or a compact row (ATL-031, frontend §6).
@@ -24,19 +30,44 @@ import { cn } from "@/lib/utils";
  * card can say *whether* an identifier is stored, which is useful, without ever
  * holding the value. Masked display and reveal are ATL-035's.
  *
- * ## Actions exist but do not work yet
+ * ## Actions exist but do not all work yet
  *
  * View, edit, archive, and request are the four frontend §6 names. Edit works —
- * ATL-033 built it. The rest await ATL-034, ATL-036, and M8, and render present
- * and disabled, following the ATL-005 top bar: the control exists, is announced,
- * and is visibly unavailable. That is honest about what the product
- * can do today, keeps the card's layout and focus order stable, and lets each
- * later ticket remove one `disabled` rather than redesign the card.
+ * ATL-033 built it. Archive and restore work since ATL-036. `View details` is
+ * still disabled (#139) and requests await M8; both render present and
+ * disabled, following the ATL-005 top bar: the control exists, is announced,
+ * and is visibly unavailable.
  *
- * Archive is disabled even though `AssetService.archiveAsset` already works:
- * ATL-036 owns the undo affordance and the copy explaining that archiving in
- * Atlas is not deletion from the service, and shipping the action without them
- * would let someone archive with no way back and no explanation.
+ * ## This card archives and restores, but it does not offer undo
+ *
+ * That is a deliberate difference from the detail page, and it is worth being
+ * precise about because the two surfaces look like they should match.
+ *
+ * A successful archive revalidates `/assets`, and since ATL-036 M2 the default
+ * list excludes archived services — so the card leaves the list immediately.
+ * That is the behaviour the list is *for*: it shows what is active, and it must
+ * be right the moment the user acts. A toast owned by this card would die with
+ * it: a probe confirmed that a portalled Radix toast unmounts with its owner
+ * even when the provider and viewport stay mounted.
+ *
+ * So the undo affordance lives on the detail page, which does not move, and this
+ * surface gets the durable half instead: the archived service is reachable
+ * through the `Archived` status filter, where the card offers **Restore**, and a
+ * failed transition reports itself in the card and stays reported.
+ *
+ * The alternatives were considered and rejected: hoisting toast state to a
+ * layout would introduce cross-component state this codebase does not have, and
+ * withholding the revalidation would leave the active list showing a service
+ * that is no longer active — a stale view chosen on purpose.
+ *
+ * ## Why this is a client component
+ *
+ * `useActionState` is the only way to get an action's result back into the page,
+ * and it is a hook. The card reads nothing and holds no secret — it receives
+ * plain data and two Server Action references — so nothing server-only is being
+ * shipped to the browser. The alternative was to put the failure alert beside
+ * the overflow trigger in the header, which is where the state would have had to
+ * live otherwise, and that is not where a user reading a card would look for it.
  */
 
 /** What the card needs. A subset of `DigitalAssetRecord`, so it cannot see more. */
@@ -66,18 +97,8 @@ const STATUS_PRESENTATION: Record<AssetStatus, { status: Status; label?: string 
   removed: { status: "neutral", label: "Removed" },
 };
 
-/** The four §6 actions, each with the ticket that will enable it. */
-const CARD_ACTIONS: {
-  key: string;
-  label: string;
-  enabledBy?: string;
-  href?: (id: string) => string;
-}[] = [
-  { key: "view", label: "View details", enabledBy: "ATL-034" },
-  { key: "edit", label: "Edit", href: (id: string) => `/assets/${id}/edit` },
-  { key: "archive", label: "Archive", enabledBy: "ATL-036" },
-  { key: "request", label: "Request deletion", enabledBy: "ATL-056" },
-];
+/** The state a card's forms start from. */
+const INITIAL: AssetActionFormState = { failure: null, attempt: 0 };
 
 const MONTHS = [
   "Jan",
@@ -126,7 +147,34 @@ function formatReviewed(lastVerifiedAt: string | null): string {
  * guarantee that is for there to be no hover-only path at all. The trigger is a
  * real button in the tab order, and Radix gives arrow-key navigation inside.
  */
-function AssetActions({ assetId, serviceName }: { assetId: string; serviceName: string }) {
+function AssetActions({
+  assetId,
+  serviceName,
+  status,
+  submitArchive,
+  submitRestore,
+}: {
+  assetId: string;
+  serviceName: string;
+  status: AssetStatus;
+  submitArchive: (formData: FormData) => void;
+  submitRestore: (formData: FormData) => void;
+}) {
+  /*
+    The transitions dispatch from `onSelect` rather than submitting a form.
+
+    A browser probe established why: Radix removes the menu's portalled subtree
+    synchronously during activation, so a submit button inside it reads
+    `connected=false` by the time the browser evaluates its activation
+    behaviour. A disconnected form does not submit — no `submit` event, no
+    Server Action request, and nothing called `preventDefault`. It failed
+    identically at every viewport because it is deterministic, not a race.
+
+    The state lives in `AssetCard`, which stays mounted when the menu closes, so
+    the result still lands. `startTransition` keeps `isPending` rising, which
+    the card's polite region depends on. See `asset-archive-toast.tsx` for the
+    full probe reading.
+  */
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -141,18 +189,74 @@ function AssetActions({ assetId, serviceName }: { assetId: string; serviceName: 
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {CARD_ACTIONS.map((action) =>
-          action.href ? (
-            // Enabled: its ticket has landed.
-            <DropdownMenuItem key={action.key} asChild data-action={action.key}>
-              <Link href={action.href(assetId)}>{action.label}</Link>
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem key={action.key} disabled data-action={action.key}>
-              {action.label}
-            </DropdownMenuItem>
-          ),
+        {/*
+          Disabled by an open defect rather than a missing feature: the detail
+          page exists since ATL-034 and #139 tracks giving the card a route to
+          it. Deliberately not fixed here — ATL-036 owns archive, not navigation.
+        */}
+        <DropdownMenuItem disabled data-action="view">
+          View details
+        </DropdownMenuItem>
+
+        {/* Enabled since ATL-033. A link, so it navigates. */}
+        <DropdownMenuItem asChild data-action="edit">
+          <Link href={`/assets/${assetId}/edit`}>Edit</Link>
+        </DropdownMenuItem>
+
+        {/*
+          The live transition, chosen by the status the server read.
+
+          A real `<form>` inside the menu, submitting a Server Action. Verified
+          by probe rather than assumed: Radix closes the menu on select, and the
+          question was whether the submission survives the close. It does — the
+          action ran, and the state landed on the card, which is outside the
+          menu and so outlives it.
+
+          Only one of the two is ever rendered. `archiveAsset` expects a status
+          of `active` and `restoreAsset` expects `archived`, so offering the
+          wrong one would be offering a write the service will refuse.
+        */}
+        {status === "active" && (
+          <DropdownMenuItem
+            data-action="archive"
+            onSelect={() => {
+              startTransition(() => {
+                submitArchive(archivePayload(assetId));
+              });
+            }}
+          >
+            {ARCHIVE_COPY.archive}
+          </DropdownMenuItem>
         )}
+
+        {status === "archived" && (
+          <DropdownMenuItem
+            data-action="restore"
+            onSelect={() => {
+              startTransition(() => {
+                submitRestore(archivePayload(assetId));
+              });
+            }}
+          >
+            {ARCHIVE_COPY.restore}
+          </DropdownMenuItem>
+        )}
+
+        {status !== "active" && status !== "archived" && (
+          /*
+            Inactive and removed services can be neither archived nor restored,
+            so the item is present and disabled — the card's existing pattern
+            for a control with no capability behind it.
+          */
+          <DropdownMenuItem disabled data-action="archive">
+            {ARCHIVE_COPY.archive}
+          </DropdownMenuItem>
+        )}
+
+        {/* ATL-056 owns requests; `data_requests` has no migration yet. */}
+        <DropdownMenuItem disabled data-action="request">
+          Request deletion
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -162,11 +266,39 @@ export interface AssetCardProps {
   asset: AssetSummary;
   /** Compact rows are the optional list view (§6 "compact list optional"). */
   compact?: boolean;
+  /**
+   * The archive and restore Server Actions, passed down from the route.
+   *
+   * Required, not optional. A card rendered without them would show an Archive
+   * item that silently did nothing — the exact failure ATL-112 existed to
+   * remove — and an optional prop makes that a runtime surprise rather than a
+   * compile error.
+   *
+   * Passed rather than imported because a feature component does not reach into
+   * `app/` (`import/no-restricted-paths`), and because it keeps the card
+   * renderable in a unit test with no session and no database.
+   */
+  archive: (state: AssetActionFormState, formData: FormData) => Promise<AssetActionFormState>;
+  restore: (state: AssetActionFormState, formData: FormData) => Promise<AssetActionFormState>;
 }
 
-export function AssetCard({ asset, compact = false }: AssetCardProps) {
+export function AssetCard({ asset, compact = false, archive, restore }: AssetCardProps) {
   const presentation = STATUS_PRESENTATION[asset.status];
   const categoryLabel = CATEGORY_LABELS.get(asset.category) ?? asset.category;
+
+  /**
+   * Two states, not one action chosen by status.
+   *
+   * A status filter can select `Active` and `Archived` together, so a card can
+   * flip from one to the other in place. Sharing a single state would then
+   * leave a failed *archive* message sitting next to a **Restore** control,
+   * describing an operation the user is no longer being offered.
+   */
+  const [archiveState, submitArchive, archiving] = useActionState(archive, INITIAL);
+  const [restoreState, submitRestore, restoring] = useActionState(restore, INITIAL);
+
+  /** Only the failure for the transition this card is actually offering. */
+  const failure = asset.status === "archived" ? restoreState : archiveState;
 
   return (
     <Card
@@ -185,7 +317,13 @@ export function AssetCard({ asset, compact = false }: AssetCardProps) {
             <p className="truncate text-body-sm text-text-secondary">{asset.serviceDomain}</p>
           )}
         </div>
-        <AssetActions assetId={asset.id} serviceName={asset.serviceName} />
+        <AssetActions
+          assetId={asset.id}
+          serviceName={asset.serviceName}
+          status={asset.status}
+          submitArchive={submitArchive}
+          submitRestore={submitRestore}
+        />
       </CardHeader>
 
       <CardContent className={cn("flex flex-wrap items-center gap-2", compact && "p-0")}>
@@ -207,6 +345,40 @@ export function AssetCard({ asset, compact = false }: AssetCardProps) {
           <Badge tone="neutral">Identifier saved</Badge>
         )}
         <span className="text-body-sm text-text-muted">{formatReviewed(asset.lastVerifiedAt)}</span>
+
+        {failure.failure && (
+          /*
+            Durable, and in the card rather than in the menu.
+
+            The menu is gone by the time the result arrives — Radix closes it on
+            select — so an error rendered inside it would never be seen. It is
+            also the half of frontend §19 this surface keeps: "durable status
+            appears in the page", and a failed write stays failed until the user
+            tries again.
+
+            Keyed on `attempt` so a second identical failure remounts the alert
+            and is announced again; a live region is announced when its content
+            changes, and the same sentence replacing itself is not a change.
+          */
+          <p
+            key={`${asset.status}-${failure.attempt}`}
+            role="alert"
+            data-slot="asset-card-error"
+            className="w-full rounded-control bg-danger/10 p-3 text-body-sm text-danger"
+          >
+            {ASSET_ACTION_FAILURE_MESSAGES[failure.failure]}
+          </p>
+        )}
+
+        {/*
+          The pending state (§18). Announced politely rather than shown as a
+          disabled control: the control the user pressed lives in a menu that has
+          already closed, so there is nothing left to disable.
+        */}
+        <span aria-live="polite" className="sr-only">
+          {archiving ? `${ARCHIVE_COPY.archive}: working` : ""}
+          {restoring ? `${ARCHIVE_COPY.restore}: working` : ""}
+        </span>
       </CardContent>
     </Card>
   );

@@ -46,4 +46,26 @@ if (typeof window !== "undefined") {
     unobserve() {}
     disconnect() {}
   };
+
+  /**
+   * Pointer capture, which jsdom does not implement at all.
+   *
+   * Radix Toast's swipe-to-dismiss handler calls `target.hasPointerCapture(...)`
+   * on every pointer-down. Without these, any `userEvent.click` inside a toast
+   * throws `TypeError: target.hasPointerCapture is not a function` — surfacing
+   * as six unhandled errors that vitest correctly warns "might cause false
+   * positive tests", while the assertions themselves still passed.
+   *
+   * Shimmed rather than worked around: the alternative was to stop using real
+   * pointer events in those tests, which would mean no longer exercising the
+   * primitive's own behaviour. This is a gap in the environment, not in the
+   * product, so it belongs here beside the other jsdom shims.
+   *
+   * Deliberately inert. Nothing in Atlas reads pointer capture, and a shim that
+   * pretended to track captured pointers would be inventing behaviour no test
+   * has asked for.
+   */
+  Element.prototype.hasPointerCapture = () => false;
+  Element.prototype.setPointerCapture = () => {};
+  Element.prototype.releasePointerCapture = () => {};
 }
