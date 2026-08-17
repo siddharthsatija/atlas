@@ -17,6 +17,29 @@ import { cn } from "@/lib/utils";
  */
 const ToastProvider = ToastPrimitive.Provider;
 
+/**
+ * The viewport is a fixed strip pinned to the bottom of **every** page, mounted
+ * once in `src/providers/index.tsx`.
+ *
+ * ## Why it must not receive pointer events
+ *
+ * It is `w-full` below `sm` (a toast spans a narrow screen) and its `p-4` gives
+ * it a height even with nothing inside, so it covers a full-width band across the
+ * bottom of the layout. Radix drops pointer events on its wrapper only while the
+ * list is *empty* — the moment any toast opens, that whole band becomes
+ * hit-testable, and a control near the bottom of the page stops being clickable
+ * even though nothing visible is on top of it. Mobile Playwright found exactly
+ * that: `toast-viewport intercepts pointer events` over "Save detail", where the
+ * shorter viewport puts the form's submit inside the band.
+ *
+ * So the strip is transparent to the pointer at all times and each `Toast`
+ * re-enables it for itself. Undo, dismiss and swipe still work because they are
+ * on the toast; the gaps, the padding and the empty strip pass clicks through to
+ * the page underneath.
+ *
+ * Keyboard access is untouched — `pointer-events` does not affect focus, the F8
+ * hotkey, or Radix's tab handling on the viewport.
+ */
 function ToastViewport({
   className,
   ...props
@@ -25,7 +48,7 @@ function ToastViewport({
     <ToastPrimitive.Viewport
       data-slot="toast-viewport"
       className={cn(
-        "fixed right-0 bottom-0 z-100 flex max-h-dvh w-full flex-col-reverse gap-2 p-4",
+        "pointer-events-none fixed right-0 bottom-0 z-100 flex max-h-dvh w-full flex-col-reverse gap-2 p-4",
         "sm:top-auto sm:right-0 sm:bottom-0 sm:max-w-sm",
         className,
       )}
@@ -36,7 +59,10 @@ function ToastViewport({
 
 const toastVariants = cva(
   cn(
-    "group border-border-default bg-surface-raised relative flex w-full items-start gap-3",
+    // `pointer-events-auto` restores what the viewport gives up. A toast is the
+    // only part of that strip a person can actually aim at, so it is the only part
+    // that should intercept a click.
+    "group border-border-default bg-surface-raised pointer-events-auto relative flex w-full items-start gap-3",
     "rounded-card border p-4 shadow-[--shadow-level-2]",
     "data-[state=open]:animate-in data-[state=closed]:animate-out",
     "data-[state=open]:slide-in-from-bottom-2 data-[state=closed]:fade-out-0",
