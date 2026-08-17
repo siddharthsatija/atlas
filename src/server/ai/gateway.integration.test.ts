@@ -324,26 +324,28 @@ describe("an empty completion is a failure, not an empty success", () => {
 });
 
 describe("no provider prose escapes", () => {
-  const SECRET = "internal-provider-detail-xyz";
+  const PROVIDER_DETAIL = "internal-provider-detail-xyz";
 
   it("is absent from the thrown error", async () => {
-    const client = failingClient(500, SECRET);
+    const client = failingClient(500, PROVIDER_DETAIL);
 
     const error = await gatewayWith(client)
       .complete(request)
       .catch((caught: unknown) => caught);
 
-    expect(JSON.stringify({ error, message: (error as Error).message })).not.toContain(SECRET);
+    expect(JSON.stringify({ error, message: (error as Error).message })).not.toContain(
+      PROVIDER_DETAIL,
+    );
   });
 
   it("is absent from every log line", async () => {
-    const client = failingClient(500, SECRET);
+    const client = failingClient(500, PROVIDER_DETAIL);
 
     await gatewayWith(client)
       .complete(request)
       .catch(() => undefined);
 
-    expect(JSON.stringify(logs)).not.toContain(SECRET);
+    expect(JSON.stringify(logs)).not.toContain(PROVIDER_DETAIL);
   });
 
   it("records the internal code and the provider status as numbers", async () => {

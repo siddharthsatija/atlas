@@ -80,27 +80,34 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+      # Browser storage and `console.*` are deliberately NOT checked here.
+      #
+      # They were, by two greps over raw file text, and both produced only false
+      # positives: a grep cannot tell a comment from code, or a type reference
+      # from a call. Every hit was prose explaining the rule — including the
+      # comment in `browser-client.ts` stating the client is "deliberately not
+      # localStorage" — plus `MockInstance<typeof console.error>`, a type, and
+      # `repo-guards.test.ts` itself, which exists to forbid exactly these.
+      #
+      # Both rules remain enforced, in two places that parse rather than grep and
+      # that already run on every pull request:
+      #
+      #   * ESLint — `no-console: "error"` repo-wide (relaxed only for
+      #     `*.config.*` and `scripts/**`), and `no-restricted-globals` for
+      #     `localStorage`/`sessionStorage`. Runs in the `lint` gate.
+      #   * `src/test/repo-guards.test.ts` — strips comments before testing, so
+      #     it flags real usage and ignores discussion of it. Runs in `test`.
+      #
+      # Deleting the greps removes the false positives without removing any
+      # enforcement. Neither replacement was weakened to accommodate this.
       - name: Check for prohibited code patterns
         run: |
           set -euo pipefail
           fail=0
 
-          # Browser storage is prohibited for privacy-relevant values (frontend spec).
-          if grep -rIn --include='*.ts' --include='*.tsx' \
-              -e 'localStorage' -e 'sessionStorage' src/ 2>/dev/null; then
-            echo "::error::Browser storage is prohibited. Persist server-side."
-            fail=1
-          fi
-
-          # Logging must route through the redaction utility (ATL-085).
-          if grep -rIn --include='*.ts' --include='*.tsx' \
-              -e 'console\.\(log\|info\|warn\|error\)' src/ 2>/dev/null \
-              | grep -v 'src/lib/telemetry/'; then
-            echo "::error::Use the redaction-aware logger, not console (ATL-085)."
-            fail=1
-          fi
-
           # A service-role client must never be constructed outside server-only modules.
+          # Kept: no ESLint rule or guard test covers this one, so the grep is the
+          # only thing enforcing it.
           if grep -rIn --include='*.tsx' -e 'SERVICE_ROLE' src/ 2>/dev/null; then
             echo "::error::Service-role key referenced from a component file."
             fail=1
