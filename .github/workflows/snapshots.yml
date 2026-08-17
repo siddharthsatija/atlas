@@ -74,7 +74,32 @@ jobs:
       # Scoped to the design-token spec. A repo-wide update would regenerate
       # baselines for specs nobody asked about, and any of those changes would
       # arrive unexplained.
+      #
+      # ## Why a non-zero exit is expected here
+      #
+      # When a baseline is absent, Playwright writes the actual PNG and then
+      # **fails the test**:
+      #
+      #   Error: A snapshot doesn't exist at …token-sheet-light-chromium-linux.png,
+      #   writing actual.
+      #
+      # That is deliberate on Playwright's part — a visual test must not report
+      # success the first time it runs, because there was nothing to compare
+      # against. On this workflow's very first run every one of the six baselines
+      # is missing, so the step exits 1 having done exactly the job it was asked
+      # to do.
+      #
+      # `continue-on-error` lets the job proceed to the check below, which is the
+      # real arbiter: the run succeeds only if precisely six `-linux.png` files
+      # exist. A genuine failure — Supabase unreachable, the page erroring, a
+      # renamed spec — writes fewer than six and still fails the job, so nothing
+      # is being swallowed. The step is marked failed in the UI either way, which
+      # keeps the true exit code visible rather than hiding it behind `|| true`.
+      #
+      # `--ignore-snapshots` is deliberately NOT used: it would skip the
+      # assertions altogether and write nothing at all.
       - name: Write missing Linux baselines
+        continue-on-error: true
         run: pnpm exec playwright test tests/e2e/design-tokens.spec.ts --update-snapshots=missing
         env:
           # Supabase URL and keys come from GITHUB_ENV above. The rest are
