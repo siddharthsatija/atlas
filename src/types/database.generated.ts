@@ -315,6 +315,74 @@ export type Database = {
         }
         Relationships: []
       }
+      data_requests: {
+        Row: {
+          asset_id: string
+          body_encrypted: string | null
+          completed_at: string | null
+          created_at: string
+          delivery_method: string | null
+          external_reference: string | null
+          follow_up_at: string | null
+          id: string
+          included_fields_json: Json
+          last_status_note: string | null
+          recipient_encrypted: string | null
+          request_type: string
+          sent_at: string | null
+          status: string
+          subject_encrypted: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          asset_id: string
+          body_encrypted?: string | null
+          completed_at?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          external_reference?: string | null
+          follow_up_at?: string | null
+          id?: string
+          included_fields_json?: Json
+          last_status_note?: string | null
+          recipient_encrypted?: string | null
+          request_type: string
+          sent_at?: string | null
+          status?: string
+          subject_encrypted?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          asset_id?: string
+          body_encrypted?: string | null
+          completed_at?: string | null
+          created_at?: string
+          delivery_method?: string | null
+          external_reference?: string | null
+          follow_up_at?: string | null
+          id?: string
+          included_fields_json?: Json
+          last_status_note?: string | null
+          recipient_encrypted?: string | null
+          request_type?: string
+          sent_at?: string | null
+          status?: string
+          subject_encrypted?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "data_requests_asset_fkey"
+            columns: ["user_id", "asset_id"]
+            isOneToOne: false
+            referencedRelation: "digital_assets"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
       digital_assets: {
         Row: {
           account_identifier_encrypted: string | null
@@ -628,6 +696,50 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      request_events: {
+        Row: {
+          actor_type: string
+          event_type: string
+          from_status: string | null
+          id: string
+          occurred_at: string
+          request_id: string
+          summary: string
+          to_status: string | null
+          user_id: string
+        }
+        Insert: {
+          actor_type: string
+          event_type: string
+          from_status?: string | null
+          id?: string
+          occurred_at?: string
+          request_id: string
+          summary: string
+          to_status?: string | null
+          user_id: string
+        }
+        Update: {
+          actor_type?: string
+          event_type?: string
+          from_status?: string | null
+          id?: string
+          occurred_at?: string
+          request_id?: string
+          summary?: string
+          to_status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "request_events_request_fkey"
+            columns: ["user_id", "request_id"]
+            isOneToOne: false
+            referencedRelation: "data_requests"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
       }
       user_encryption_keys: {
         Row: {
