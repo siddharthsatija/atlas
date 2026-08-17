@@ -77,6 +77,30 @@ jobs:
 
       - name: Database integration tests
         run: pnpm test:integration
+        env:
+          # Supabase URL and keys come from GITHUB_ENV above. The rest are
+          # non-secret local fixtures the app needs to boot; they unlock nothing
+          # and reach no hosted service.
+          #
+          # Required because three integration suites import `@/server/*`, which
+          # loads `@/config/env` and validates the WHOLE environment at module
+          # load — not just the variables a given test touches. Without this
+          # block the job failed on `AUDIT_HMAC_KEY`, `ANTHROPIC_API_KEY` and the
+          # rate-limit pair before executing a single assertion.
+          #
+          # Placeholders rather than `secrets.*` by policy: `ci-policy.ts` allows
+          # only `GITHUB_TOKEN`, and `pnpm ci:verify-policy` fails the build on
+          # anything else (security §9 — CI has no access to production secrets).
+          # Copied verbatim from the `e2e` job below and the `build` workflow so
+          # the four jobs cannot drift apart.
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
+          ATLAS_KEK_VERSION: "1"
+          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
+          ANTHROPIC_API_KEY: ci-placeholder
+          RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
+          RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          ATLAS_ENV: preview
 
       - name: Stop Supabase
         if: always()

@@ -1,0 +1,115 @@
+name: Snapshots
+
+# Generates Playwright visual baselines for the platform CI actually runs on.
+#
+# ## Why this exists
+#
+# `tests/e2e/design-tokens.spec.ts-snapshots/` holds only `-darwin.png` baselines,
+# committed from a developer Mac. Playwright names baselines per platform, so on
+# `ubuntu-latest` it looks for `-linux.png`, finds nothing, and the six design
+# token snapshots fail — as they have on every CI run since they were added.
+#
+# The fix is real Linux baselines. They cannot be produced on a Mac and must not
+# be faked: renaming or copying a Darwin PNG would commit a baseline that no
+# renderer ever produced, so the first genuine regression would be invisible
+# while every run compared against fiction.
+#
+# ## Why manual-only, and why it uploads instead of committing
+#
+# `workflow_dispatch` is the sole trigger. A baseline generator that ran on push
+# would rewrite the very artefact the E2E job compares against, and a visual
+# regression test that regenerates its own expectation cannot fail. So this runs
+# only when a human asks, and it hands back an artifact rather than committing:
+# the six PNGs get reviewed by eye before they become the thing CI trusts.
+#
+# `--update-snapshots=missing` writes only baselines that do not exist. An
+# existing Linux baseline is therefore never silently replaced by this workflow —
+# updating one after a deliberate design change stays an explicit act.
+#
+# ## After the run
+#
+# Download the `playwright-linux-snapshots` artifact from the run summary, unzip
+# it, and copy the six `*-linux.png` files into
+# `tests/e2e/design-tokens.spec.ts-snapshots/`. Commit them alongside the Darwin
+# baselines — both platforms are then covered, and the E2E job goes green without
+# any test being skipped or restricted.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: snapshots-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux-baselines:
+    name: Generate Linux visual baselines
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Identical setup to the `e2e` job in test.yml. The baselines have to be
+      # produced by the same stack that will later be compared against them: a
+      # different Supabase state or a different app boot would render a different
+      # page, and the baseline would encode that difference forever.
+      - name: Start local Supabase
+        run: pnpm db:start
+
+      - name: Export local Supabase credentials
+        run: ./.github/scripts/export-supabase-env.sh
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Scoped to the design-token spec. A repo-wide update would regenerate
+      # baselines for specs nobody asked about, and any of those changes would
+      # arrive unexplained.
+      - name: Write missing Linux baselines
+        run: pnpm exec playwright test tests/e2e/design-tokens.spec.ts --update-snapshots=missing
+        env:
+          # Supabase URL and keys come from GITHUB_ENV above. The rest are
+          # non-secret local fixtures, copied verbatim from the `e2e` job so the
+          # page under test boots identically.
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
+          ATLAS_KEK_VERSION: "1"
+          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
+          ANTHROPIC_API_KEY: ci-placeholder
+          RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
+          RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          ATLAS_ENV: preview
+
+      # Fails rather than uploading an empty artifact. A run that produced no
+      # baselines but reported success would send someone to download nothing.
+      - name: Confirm baselines were produced
+        run: |
+          set -euo pipefail
+          count=$(find tests/e2e/design-tokens.spec.ts-snapshots -name '*-linux.png' | wc -l)
+          echo "Found $count Linux baseline(s):"
+          find tests/e2e/design-tokens.spec.ts-snapshots -name '*-linux.png' -print
+          if [ "$count" -ne 6 ]; then
+            echo "::error title=Unexpected baseline count::Expected 6 (3 projects x light/dark), got $count."
+            exit 1
+          fi
+
+      - name: Upload Linux baselines
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-linux-snapshots
+          path: tests/e2e/design-tokens.spec.ts-snapshots/*-linux.png
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Stop Supabase
+        if: always()
+        run: pnpm db:stop
