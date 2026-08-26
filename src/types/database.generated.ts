@@ -443,6 +443,125 @@ export type Database = {
         }
         Relationships: []
       }
+      discovery_provider_invocation_fields: {
+        Row: {
+          created_at: string
+          field_id: string
+          field_type: string
+          id: string
+          invocation_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          field_id: string
+          field_type: string
+          id?: string
+          invocation_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          field_id?: string
+          field_type?: string
+          id?: string
+          invocation_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discovery_provider_invocation_fields_field_fkey"
+            columns: ["user_id", "field_id"]
+            isOneToOne: false
+            referencedRelation: "user_personal_fields"
+            referencedColumns: ["user_id", "id"]
+          },
+          {
+            foreignKeyName: "discovery_provider_invocation_fields_invocation_fkey"
+            columns: ["user_id", "invocation_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_provider_invocations"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
+      discovery_provider_invocations: {
+        Row: {
+          completed_at: string | null
+          consent_proof_issued_at: string | null
+          created_at: string
+          error_code: string | null
+          id: string
+          invocation_status: string | null
+          provider_class: string
+          run_id: string
+          started_at: string | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          consent_proof_issued_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          id?: string
+          invocation_status?: string | null
+          provider_class: string
+          run_id: string
+          started_at?: string | null
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          consent_proof_issued_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          id?: string
+          invocation_status?: string | null
+          provider_class?: string
+          run_id?: string
+          started_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discovery_provider_invocations_run_fkey"
+            columns: ["user_id", "run_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_runs"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
+      discovery_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          id: string
+          run_status: string
+          started_at: string | null
+          triggered_by: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          run_status?: string
+          started_at?: string | null
+          triggered_by: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          run_status?: string
+          started_at?: string | null
+          triggered_by?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       idempotency_keys: {
         Row: {
           completed_at: string | null
