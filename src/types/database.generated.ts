@@ -386,9 +386,11 @@ export type Database = {
       digital_assets: {
         Row: {
           account_identifier_encrypted: string | null
+          candidate_id: string | null
           category: string
           confidence: string
           created_at: string
+          deleted_at: string | null
           id: string
           last_verified_at: string | null
           metadata_json: Json
@@ -403,9 +405,11 @@ export type Database = {
         }
         Insert: {
           account_identifier_encrypted?: string | null
+          candidate_id?: string | null
           category: string
           confidence?: string
           created_at?: string
+          deleted_at?: string | null
           id?: string
           last_verified_at?: string | null
           metadata_json?: Json
@@ -420,9 +424,11 @@ export type Database = {
         }
         Update: {
           account_identifier_encrypted?: string | null
+          candidate_id?: string | null
           category?: string
           confidence?: string
           created_at?: string
+          deleted_at?: string | null
           id?: string
           last_verified_at?: string | null
           metadata_json?: Json
@@ -747,6 +753,7 @@ export type Database = {
           destroyed_at: string | null
           id: string
           kek_version: number
+          key_purpose: string
           status: string
           updated_at: string
           user_id: string
@@ -757,6 +764,7 @@ export type Database = {
           destroyed_at?: string | null
           id?: string
           kek_version: number
+          key_purpose?: string
           status?: string
           updated_at?: string
           user_id: string
@@ -767,6 +775,7 @@ export type Database = {
           destroyed_at?: string | null
           id?: string
           kek_version?: number
+          key_purpose?: string
           status?: string
           updated_at?: string
           user_id?: string
@@ -779,6 +788,7 @@ export type Database = {
           created_at: string
           field_key: string
           id: string
+          include_in_discovery: boolean
           label: string
           last_used_at: string | null
           updated_at: string
@@ -789,6 +799,7 @@ export type Database = {
           created_at?: string
           field_key: string
           id?: string
+          include_in_discovery?: boolean
           label: string
           last_used_at?: string | null
           updated_at?: string
@@ -799,6 +810,7 @@ export type Database = {
           created_at?: string
           field_key?: string
           id?: string
+          include_in_discovery?: boolean
           label?: string
           last_used_at?: string | null
           updated_at?: string

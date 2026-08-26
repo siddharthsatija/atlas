@@ -4,10 +4,10 @@
 
 - **P0:** required before MVP launch. **P1:** targeted for MVP if schedule allows.
 - **S/M/L/XL:** relative complexity, not time commitments.
-- Tickets are listed in **implementation order**, grouped into milestones M0–M12. A ticket's dependencies must be complete (or explicitly stubbed) before it starts.
+- Tickets are listed in **implementation order**, grouped into milestones M0–M13. A ticket's dependencies must be complete (or explicitly stubbed) before it starts.
 - Security and privacy acceptance criteria apply to every ticket even when not repeated: authorization verified server-side, inputs validated with Zod, no restricted data in logs/analytics, RLS on any new user-owned table with two-user tests.
 - UI tickets always cover loading, empty, error, success, keyboard, and responsive states.
-- References: ADR-001…006 in `docs/adr/`, architecture (02), security (03), frontend (04).
+- References: ADR-001…008 in `docs/adr/`, architecture (02), security (03), frontend (04).
 
 ## Definition of done
 
@@ -30,6 +30,7 @@ A ticket is done only when acceptance criteria pass, authorization and validatio
 | M10       | Activity, archive, search, settings      | 070, 071, 072, 073, 074, 075, 076, 077                                         |
 | M11       | Privacy operations                       | 079, 080, 081, 082, 110                                                        |
 | M12       | Quality and launch                       | 088, 091, 092, 093, 094, 096, 097, 098, 099, 100                               |
+| M13       | Discovery                                | 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 214          |
 
 ---
 
@@ -1575,3 +1576,291 @@ A single range qual — no disjunction, therefore no `BitmapOr` candidate, there
 - PRD §14 launch criteria all pass with evidence; open-questions.md reviewed — no unresolved launch-blocking decisions.
 
 **Testing:** criteria evidence review.
+---
+
+## M13 · Discovery
+
+### ATL-200 · Discovery schema foundation
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** L · **Depends on:** ATL-027, ATL-038, ATL-078, ATL-085, ATL-105
+
+**Objective:** Prepare existing tables for the discovery feature set. This is the only migration that touches tables owned by prior milestones; all new discovery tables are added by ATL-201 and ATL-202.
+
+Changes:
+- `digital_assets`: add `'discovery'` to `source_type` check constraint; add nullable `candidate_id uuid` column with a forward-reference FK to `discovery_candidates (id)` (deferred foreign key, or added after ATL-202 via a separate ALTER); add `deleted_at timestamptz` for soft-deletion in the de-confirmation flow (ADR-007 §9); add conditional pairing check constraint — `(source_type = 'discovery' AND candidate_id IS NOT NULL) OR (source_type != 'discovery' AND candidate_id IS NULL)`.
+- `privacy_findings`: add `'discovery'` to `source_type` check constraint; add the C1-D enforcement constraint: `CHECK (source_type != 'discovery' OR asset_id IS NOT NULL)` — a discovery-source finding without a confirmed asset is rejected at the DB layer (ADR-007 §7); add a check constraint on `evidence_refs_json` enforcing the typed-entry closed vocabulary for discovery-source findings only (source-type-scoped; non-discovery rows are unconstrained and retain their existing `'{}'` default). For `source_type = 'discovery'`: `evidence_refs_json` must be a JSONB array (`jsonb_typeof = 'array'`) with at least one element (`jsonb_array_length >= 1`); every element must have a non-null `type` within the closed ADR-007 vocabulary (`discovery_evidence`, `digital_asset`) and a non-null `id`. The check expression uses a CASE guard that short-circuits on non-discovery rows, non-array values, and empty arrays before the element scan; the ELSE branch uses `NOT jsonb_path_exists(evidence_refs_json, '$[*] ? (!exists(@.type) || @.type == null || (@.type != "discovery_evidence" && @.type != "digital_asset") || !exists(@.id) || @.id == null)')` (a scalar expression; PostgreSQL CHECK constraints do not permit subqueries, so `NOT EXISTS ... jsonb_array_elements` cannot be used here).
+- `user_encryption_keys`: add `key_purpose text NOT NULL DEFAULT 'content'`; update the partial unique index from `(user_id) WHERE status = 'active'` to `(user_id, key_purpose) WHERE status = 'active'`, allowing one active key per `(user_id, key_purpose)` pair.
+- `user_personal_fields`: rename `use_for_discovery` column to `include_in_discovery` (or add it as a new `boolean NOT NULL DEFAULT false` column if ATL-105 did not add the discovery column); update the column comment to reflect preference semantics.
+- `consents`: add `'discovery_hashed_query'`, `'discovery_identifying'`, and `'discovery_connected_sources'` to the `consent_type` check constraint (ADR-007 schema adaptations; ADR-008 §12).
+
+**Acceptance criteria**
+
+- All five table changes applied; existing rows unaffected (append-only ALTERs, no destructive changes).
+- `digital_assets`: `source_type = 'discovery'` accepted; conditional pairing constraint rejects a discovery row with `candidate_id IS NULL` and a non-discovery row with `candidate_id IS NOT NULL`; `deleted_at` column present and nullable.
+- `privacy_findings`: `source_type = 'discovery'` accepted; C1-D constraint rejects `(source_type = 'discovery', asset_id = NULL)`; non-discovery rows with `asset_id = NULL` continue to be accepted; `evidence_refs_json` constraint: valid populated discovery array accepted; empty discovery array `'[]'` rejected; `'{}'` (object) on a discovery finding rejected; unsupported reference type rejected; element with null `type` rejected; element with null `id` rejected; non-discovery row with existing `'{}'` default accepted.
+- `user_encryption_keys`: two active rows with `key_purpose = 'content'` and `key_purpose = 'rejection'` coexist for the same user; two active rows with the same `key_purpose` are rejected.
+- `user_personal_fields`: `include_in_discovery` column present with default `false`.
+- `consents`: all three new `consent_type` values accepted; existing `consent_type` values unaffected.
+- Migration applies cleanly on a local Supabase instance with existing demo data.
+- Two-user RLS behavior on `digital_assets`, `privacy_findings`, `user_personal_fields`, and `consents` is unchanged by this migration.
+
+**Testing:** Constraint acceptance/rejection tests for every new constraint; `user_encryption_keys` uniqueness matrix; `source_type` and `consent_type` enum extension; existing-row safety check on a seeded dataset.
+
+---
+
+### ATL-201 · Discovery runs and invocations schema
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-200, ATL-078
+
+**Objective:** Create the tables that track the lifecycle of a discovery run and the outbound provider calls it generates: `discovery_runs`, `discovery_provider_invocations`, and `discovery_provider_invocation_fields` (ADR-007 §5, ADR-008 §5).
+
+**Acceptance criteria**
+
+- `discovery_runs`: `id uuid PK`, `user_id` (→ `auth.users`), `run_status text NOT NULL DEFAULT 'pending'` check `('pending', 'running', 'completed', 'partial', 'blocked', 'failed')`, `triggered_by text NOT NULL` check `('user', 'scheduled', 'profile_change')`, `started_at timestamptz`, `completed_at timestamptz`, `created_at timestamptz NOT NULL DEFAULT now()`. `UNIQUE (user_id, id)` required for the composite FK used by `discovery_provider_invocations`.
+- `discovery_provider_invocations`: `id uuid PK`, `run_id uuid NOT NULL`, `user_id uuid NOT NULL`, `provider_class text NOT NULL`, `invocation_status text` (nullable; terminal values only: `success`, `blocked`, `error`, `rate_limited`; ADR-008 §10), `consent_proof_issued_at timestamptz` (from the ConsentProof for this invocation; ADR-008 §10), `started_at timestamptz`, `completed_at timestamptz`, `error_code text`, `created_at timestamptz NOT NULL DEFAULT now()`. Composite FK `FOREIGN KEY (user_id, run_id) REFERENCES discovery_runs (user_id, id)`. Three lifecycle check constraints: (1) terminal `invocation_status` requires non-null `completed_at`; (2) non-null `completed_at` requires terminal `invocation_status`; (3) non-null `completed_at` requires non-null `started_at`. `UNIQUE (user_id, id)` for downstream composite FKs.
+- `discovery_provider_invocation_fields`: `id uuid PK`, `user_id uuid NOT NULL`, `invocation_id uuid NOT NULL`, `field_id uuid NOT NULL` (→ `user_personal_fields`), `field_type text NOT NULL`, `created_at timestamptz NOT NULL DEFAULT now()`. Cross-user composite ownership constraints: `FOREIGN KEY (user_id, invocation_id) REFERENCES discovery_provider_invocations (user_id, id)` and `FOREIGN KEY (user_id, field_id) REFERENCES user_personal_fields (user_id, id)` (ADR-008 §10). The `user_personal_fields` FK requires `UNIQUE (user_id, id)` on `user_personal_fields`. The current `user_personal_fields` schema (ATL-105 migration) does not contain this constraint; ATL-201 owns adding it as a prerequisite step before creating the `discovery_provider_invocation_fields` composite FK. To keep the migration safe if a subsequent migration introduces the constraint before ATL-201 executes, add it conditionally (e.g. a `DO $$ BEGIN IF NOT EXISTS ... END IF; END $$` guard or equivalent `ALTER TABLE ... ADD CONSTRAINT IF NOT EXISTS` form if the target PostgreSQL version supports it). Field-set uniqueness: `UNIQUE (user_id, invocation_id, field_id)`. This is the mapping table that decouples the number of authorized fields from the number of invocations (ADR-008 §5.1). Zero rows for an invocation is a valid pre-dispatch state; the dispatch engine treats it as the empty-mapping fail-closed condition.
+- RLS on all three tables: `authenticated` may select own rows; no client insert, update, or delete policies. `service_role` granted all privileges.
+- Partial index on `discovery_runs (user_id, created_at DESC)` for run history queries.
+
+**Testing:** `UNIQUE (user_id, id)` on both `discovery_runs` and `discovery_provider_invocations`; all three lifecycle check constraints reject the three prohibited states; `discovery_provider_invocation_fields` uniqueness; two-user RLS on all three tables.
+
+---
+
+### ATL-202 · Discovery evidence, candidates, and rejections schema
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-201, ATL-027
+
+**Objective:** Create the tables that hold discovery results and permanent suppression records: `discovery_evidence`, `discovery_candidates`, and `discovery_rejections` (ADR-007 §6, §7, §8).
+
+**Acceptance criteria**
+
+- `discovery_evidence`: `id uuid PK`, `user_id`, `invocation_id` (→ `discovery_provider_invocations`), `provider_class text NOT NULL`, `is_aggregator_attributed boolean NOT NULL DEFAULT false`, `evidence_type text NOT NULL`, `evidence_summary text NOT NULL`, `provider_evidence_json text` (AES-256-GCM, per-user DEK, AAD = `discovery_evidence.provider_evidence_json:<record_uuid>`; ADR-003, ADR-008 §7; nullable if no raw payload applies), `created_at timestamptz NOT NULL DEFAULT now()`. `UNIQUE (user_id, id)` for downstream composite FKs.
+- `discovery_candidates`: `id uuid PK`, `user_id`, `evidence_id` (→ `discovery_evidence`), `status text NOT NULL DEFAULT 'pending'` check `('pending', 'confirmed', 'rejected', 'dismissed', 'not_sure')`, `asset_id uuid` (nullable; populated on confirm; composite FK `FOREIGN KEY (user_id, asset_id) REFERENCES digital_assets (user_id, id)` via the existing `UNIQUE (user_id, id)` on `digital_assets` from ATL-028), `adjudicated_at timestamptz`, `created_at timestamptz NOT NULL DEFAULT now()`, `updated_at timestamptz NOT NULL DEFAULT now()`. No `service_name` or `service_domain` columns — those are derived at read time from the linked `digital_asset` (on confirm) or from `discovery_evidence` (before confirm). Partial unique index on `(user_id, evidence_id) WHERE status = 'pending'` — one pending candidate per evidence record per user.
+- `discovery_rejections`: `id uuid PK`, `user_id`, `fingerprint text NOT NULL` (HMAC format: `{"v":1,"alg":"hmac-sha256","value":"<base64url>"}`, ADR-008 §8; stored as text, not AES-encrypted), `provider_class text NOT NULL`, `created_at timestamptz NOT NULL DEFAULT now()`. Unique on `(user_id, fingerprint)`. Rejection fingerprints are permanent until account deletion.
+- RLS on all three tables: `authenticated` may select own rows; no client write policies. `service_role` all privileges.
+- `digital_assets.candidate_id` FK (added by ATL-200) is now satisfiable: add a real FK constraint `digital_assets.candidate_id REFERENCES discovery_candidates (id)` (deferred or in a new migration after this ticket).
+
+**Testing:** `discovery_candidates` composite FK to `digital_assets`; pending-candidate partial unique index; `discovery_rejections` fingerprint uniqueness; `is_aggregator_attributed` flag accepted; two-user RLS on all three tables.
+
+---
+
+### ATL-203 · Rejection key service
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-200, ATL-103
+
+**Objective:** Extend the key management infrastructure to create and retrieve a per-user rejection key, stored in `user_encryption_keys` under `key_purpose = 'rejection'` (ATL-200). The rejection key is used exclusively for HMAC-SHA256 operations on rejection fingerprints (ADR-008 §8). It must never be used as an AES-GCM key.
+
+**Acceptance criteria**
+
+- `RejectionKeyService.getOrCreate(userId)` creates the rejection key on first call (lazy, race-safe using the same upsert pattern as the content DEK). Stores in `user_encryption_keys` with `key_purpose = 'rejection'`; the wrapped key material uses the atlas envelope format (`atlas.v1.<nonce_b64url>.<ciphertext+tag_b64url>`) with AAD `user_encryption_keys.wrapped_key:<row_id>` (ADR-003).
+- `getRejectionKey(userId)` unwraps and returns key material for HMAC operations. Return type is a branded TypeScript type (`RejectionKey`) that is not assignable to the AES content-key type — prevents misuse at the type layer.
+- Race-safe: concurrent first-write resolves to one winner via upsert `ON CONFLICT DO NOTHING` + re-select.
+- Account deletion (ATL-082): `destroyAllForUser` covers the rejection key. Add ATL-082 as a dependency for this ticket to ensure the deletion path is updated.
+- The rejection key value never appears in logs, structured or otherwise.
+- **Purpose-aware key lookup prerequisite (must be resolved before any `key_purpose = 'rejection'` row is persisted):** ATL-200 changes `user_encryption_keys` active-key uniqueness from `(user_id) WHERE status = 'active'` to `(user_id, key_purpose) WHERE status = 'active'`. The existing content-encryption path (`EncryptionService`, `EncryptionKeyRepository`) selects the active key with a purpose-blind `rows.find(r => r.status === 'active')` — safe only while every user has at most one active key. This ticket's introduction of `key_purpose = 'rejection'` rows ends that assumption. Before any `key_purpose = 'rejection'` row is persisted: (1) content encryption and decryption must filter the active-key query to `key_purpose = 'content'`; (2) rejection-key retrieval must filter to `key_purpose = 'rejection'`; (3) no repository or service method may use a purpose-blind active-key lookup once multiple key purposes exist for a user. Account deletion (`destroyAllForUser`) is deliberately purpose-agnostic and must remain so — it must destroy all `user_encryption_keys` rows for the user regardless of `key_purpose`.
+
+**Testing:** lazy creation (first call creates, second returns same key); concurrent-creation race produces exactly one row; round-trip HMAC verify; branded-type compile-time rejection of AES misuse; rejection key destroyed on account deletion; purpose-isolation regression — when a user holds both an active `key_purpose = 'content'` row and an active `key_purpose = 'rejection'` row, content encrypt/decrypt uses only the content key and rejection-fingerprint operations use only the rejection key, with neither selection depending on database row insertion order.
+
+---
+
+### ATL-204 · Identity Profile service layer
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-200, ATL-105, ATL-103
+
+**Objective:** Extend the existing personal fields service to expose `include_in_discovery` management: the preference that gates whether a stored field is eligible to be offered to discovery providers. The underlying table is `user_personal_fields` (ATL-105). This ticket adds the discovery-aware methods without duplicating the existing CRUD operations.
+
+**Acceptance criteria**
+
+- `PersonalFieldService.setIncludeInDiscovery(userId, fieldId, enabled)`: toggles the `include_in_discovery` preference; verifies ownership (non-oracle pattern); emits an activity event. Does not modify the encrypted field value.
+- `PersonalFieldService.getDiscoveryEligibleFields(userId)`: returns the decrypted field values and types for all `user_personal_fields` rows where `include_in_discovery = true`; used by the consent service and dispatch engine. Returns only own fields; cross-user call returns empty (non-oracle).
+- `PersonalFieldService.removeField(userId, fieldId)`: hard delete (the field must not contribute to future discovery runs); if any in-progress `discovery_provider_invocation_fields` rows reference the field, the method must block the delete and return a structured error directing the caller to wait for the run to complete. Document this behavior in the service JSDoc.
+- All existing `PersonalFieldService` operations (add, get, list, update) are unchanged and their tests continue to pass.
+
+**Testing:** `setIncludeInDiscovery` toggle; `getDiscoveryEligibleFields` returns only `include_in_discovery = true` rows; cross-user denial on all new methods; `removeField` with active invocation reference blocks; activity events emitted.
+
+---
+
+### ATL-205 · Discovery consent service and ConsentProof
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** L · **Depends on:** ATL-201, ATL-204, ATL-078
+
+**Objective:** Implement `DiscoveryConsentService` to grant and revoke consent per provider class, record and query first-disclosure acknowledgments, and produce a `ConsentProof` token that authorizes a single provider invocation (ADR-008 §2, §3, §4).
+
+**Acceptance criteria**
+
+- `grantConsent(userId, providerClass, consentType)`: writes to `discovery_runs`-adjacent consent tracking (a `discovery_consents` table, created as part of ATL-201 or this ticket — see note below); emits `discovery.consent.granted` audit event to `activity_events`.
+- `revokeConsent(userId, providerClass)`: records revocation; emits `discovery.consent.revoked` audit event. Does not retroactively block in-flight invocations that already passed the dispatch check.
+- `recordFirstDisclosureAcknowledgment(userId, fieldId, providerClass, contractVersion)`: writes the acknowledgment record; emits `discovery.disclosure.acknowledged` audit event. Idempotent on same `(userId, fieldId, providerClass, contractVersion)`.
+- `hasActiveConsent(userId, providerClass)`: live query (not cached); used as dispatch check 5 in ATL-206.
+- `issueConsentProof(userId, runId, invocationId, providerClass, authorizedFieldIds)`: returns a `ConsentProof` value. `ConsentProof` has an unexported constructor — only `DiscoveryConsentService` may instantiate it. Fields: `user_id`, `consent_type`, `provider_class`, `authorized_field_ids`, `issued_at`, `discovery_run_id`, `invocation_id` (7 fields, ADR-008 §4). `ConsentProof` is an in-process value; it does not cross a network boundary.
+- **Note on `discovery_consents` table:** If not included in ATL-201, add it here: `id`, `user_id`, `provider_class`, `consent_type`, `granted_at`, `revoked_at` (nullable); `UNIQUE (user_id, provider_class) WHERE revoked_at IS NULL`.
+- All six discovery audit event classes (ADR-008 §11) must be wired: `discovery.consent.granted`, `discovery.consent.revoked`, `discovery.disclosure.acknowledged`, `discovery.provider.invoked` (ATL-206), `discovery.candidate.adjudicated` (ATL-208), `discovery.candidate.deconfirmed` (ATL-208). This ticket wires the first three; ATL-206 and ATL-208 wire the remaining three.
+
+**Testing:** `ConsentProof` unexported-constructor enforcement at compile time; all 7 ConsentProof fields present; consent grant/revoke lifecycle; duplicate acknowledgment is idempotent; `hasActiveConsent` returns false after revoke; audit events for all three consent-related classes.
+
+---
+
+### ATL-206 · Provider dispatch engine
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** XL · **Depends on:** ATL-201, ATL-205
+
+**Objective:** Implement the provider dispatch engine: the 8-check `ConsentProof` validation sequence (ADR-008 §4), invocation lifecycle management, and the empty-mapping fail-closed rule. This ticket is the enforcement point for the outbound disclosure boundary.
+
+**Acceptance criteria**
+
+- `DispatchEngine.dispatch(consentProof, invocationId, providerAdapter)` runs all 8 checks before any provider is called:
+  1. `consentProof.discovery_run_id` matches the `run_id` on the `discovery_provider_invocations` row.
+  2. `consentProof.invocation_id` matches `invocationId`.
+  3. `consentProof.provider_class` matches the invocation row's `provider_class`.
+  4. `consentProof.consent_type` matches the active consent for that provider class.
+  5. Live consent query: `hasActiveConsent(userId, providerClass)` returns true at dispatch time.
+  6. Load `discovery_provider_invocation_fields` rows for `invocationId`: (a) if zero rows, set `invocation_status = 'blocked'` and return immediately — no provider call; (b) assert every `field_id` in the mapping is present in `consentProof.authorized_field_ids`.
+  7. Per-field eligibility: each mapped field must have `include_in_discovery = true` on its `user_personal_fields` row, and the field's `field_type` must be eligible for the invocation's `provider_class`.
+  8. First-disclosure acknowledgment: for identifying providers, a `discovery_first_disclosure_acknowledgments` row must exist for each `(user_id, field_id, provider_class)`. The `discovery_hashed_query` provider class (HIBP) is exempt from this check (ADR-008 §3).
+- Any failed check (1–8) sets `invocation_status = 'blocked'` and records the blocking reason in a structured log field. No provider HTTP call is made on a block.
+- On all 8 checks passing: call `providerAdapter.query(...)`, write results, and set `invocation_status` to the appropriate terminal value in a single write. `invocation_status` is set exactly once; it is not overwritten after being set.
+- Structured log fields use operation names matching `^[a-z][a-z0-9]*(?:\.[a-z0-9]+)*$` (no underscores). No restricted field values (plaintext email, field values) appear in log output.
+- Emits `discovery.provider.invoked` audit event on terminal status (success or blocked or error).
+
+**Testing:** each of the 8 checks, individually, blocks and logs correctly when violated; empty-mapping blocks before provider call; HIBP exempt from check 8; successful dispatch reaches the provider adapter; `invocation_status` set exactly once and not overwritten; log fields contain no restricted values.
+
+---
+
+### ATL-207 · HIBP discovery provider adapter
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-202, ATL-203, ATL-206
+
+**Objective:** Implement the HIBP Have I Been Pwned adapter for the `discovery_hashed_query` provider class (ADR-008 §1). The adapter transmits a 6-character hex SHA-1 prefix — never the plaintext email — and processes the k-anonymity response to produce evidence and candidate records.
+
+**Acceptance criteria**
+
+- `HibpAdapter.query(userId, emailField)`: computes `SHA-1(email.trim().toLowerCase()).slice(0, 6)` (6 hex characters; ADR-008 §1 and ADR-007 Consequences — note: the HIBP Pwned Passwords API uses 5 characters; this is the breached-account range endpoint, which uses 6), calls the HIBP range endpoint, and parses the breach list from the response.
+- For each breach in the response:
+  - If `IsAggregator = true`: create a `discovery_evidence` row with `is_aggregator_attributed = true`; do **not** create a `discovery_candidates` row (ADR-007 §12).
+  - If `IsAggregator = false`: create a `discovery_evidence` row with `is_aggregator_attributed = false`; check the rejection fingerprint before creating a candidate (see next point).
+- Rejection fingerprint check (before any non-aggregator candidate creation): compute `HMAC-SHA256(rejectionKey, 'discovery_hashed_query' + "\x00" + breachName.trim().toLowerCase())`; encode as `{"v":1,"alg":"hmac-sha256","value":"<base64url>"}` (ADR-008 §8); query `discovery_rejections` for `(user_id, fingerprint)`. If found, skip candidate creation. The rejection key comes from `RejectionKeyService` (ATL-203).
+- The plaintext email address must not appear in `evidence_summary`, `source_reference`, any log field, or any column other than the encrypted `provider_evidence_json` (if populated; AAD = `discovery_evidence.provider_evidence_json:<record_uuid>`, ADR-008 §7) and the in-memory computation.
+- Rate-limit response from HIBP: set `invocation_status = 'rate_limited'`. Network or parse error: set `invocation_status = 'error'`. Both paths skip candidate and evidence creation for the failed request.
+- Emits `discovery.provider.invoked` audit event (via the dispatch engine, ATL-206).
+
+**Testing:** SHA-1 prefix is exactly 6 hex characters; aggregator breach creates evidence only; non-aggregator breach creates evidence + candidate; rejection fingerprint match suppresses candidate; plaintext email absent from all non-encrypted outputs; rate-limit and network-error paths set the correct terminal status.
+
+---
+
+### ATL-208 · Candidate adjudication service
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-202, ATL-203, ATL-207
+
+**Objective:** Implement `CandidateAdjudicationService` for the four adjudication outcomes (Confirm, Reject, Dismiss, Not sure) and the atomic de-confirmation operation (ADR-007 §7, §9).
+
+**Acceptance criteria**
+
+- `confirm(userId, candidateId)`: sets `discovery_candidates.status = 'confirmed'`; creates a `digital_assets` row with `source_type = 'discovery'` and `candidate_id` back-linked; sets `discovery_candidates.asset_id`; emits `discovery.candidate.adjudicated` (outcome: `confirmed`) audit event. The findings pipeline may run against the new asset immediately after commit.
+- `reject(userId, candidateId)`: sets `discovery_candidates.status = 'rejected'`; computes the HMAC rejection fingerprint using `RejectionKeyService` (ATL-203) and writes to `discovery_rejections`; emits `discovery.candidate.adjudicated` (outcome: `rejected`) audit event.
+- `dismiss(userId, candidateId)`: sets `discovery_candidates.status = 'dismissed'`; no fingerprint written; emits `discovery.candidate.adjudicated` (outcome: `dismissed`) audit event.
+- `markNotSure(userId, candidateId)`: sets `discovery_candidates.status = 'not_sure'`; no fingerprint written; emits `discovery.candidate.adjudicated` (outcome: `not_sure`) audit event. `not_sure` rate is a provider-quality signal and should be surfaced in monitoring (ADR-007 §7).
+- `deconfirm(userId, assetId)`: atomic transaction executing steps in ADR-007 §9 order: (1) resolve all open `privacy_findings` against the asset with `resolved_by = 'system'` and a structured `source_reference` of `asset_deconfirmed`; (2) soft-delete the `digital_assets` row by setting `deleted_at = now()` (the row is retained for audit; it does not cascade-delete the candidate or evidence); (3) move the originating `discovery_candidates` row to `status = 'rejected'`; (4) write a rejection fingerprint to `discovery_rejections`. Emits `discovery.candidate.deconfirmed` audit event. Not available on manually-added assets (`source_type != 'discovery'` returns a structured NOT_FOUND error).
+- All operations verify ownership using the non-oracle pattern (cross-user call returns NOT_FOUND, indistinguishable from a missing record).
+
+**Testing:** all four adjudication outcomes; `confirm` creates a `digital_assets` row with correct columns; `reject` writes fingerprint; `deconfirm` executes steps in ADR-007 §9 order (assert transaction atomicity); `deconfirm` on a manual asset returns NOT_FOUND; cross-user denial on all operations; C1-D DB constraint does not fire on a valid `confirm` call.
+
+---
+
+### ATL-209 · Identity Profile UI and settings
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-204, ATL-016, ATL-075
+
+**Objective:** Expose `user_personal_fields` as the Identity Profile in onboarding and in Settings > Identity Profile (FR-15): add/view/delete identity fields, toggle `include_in_discovery` per field, display masked values by default.
+
+**Acceptance criteria**
+
+- Onboarding step: user can add at least one email address; name, phone, location, and usernames are optional. Each field shows its current `include_in_discovery` state. User can enable or disable discovery per field. At least one email with `include_in_discovery = true` is required before the discovery run step (soft enforcement with a visible prompt, not a hard block).
+- Settings > Identity Profile: same add/edit/delete capabilities as onboarding, plus bulk view and per-field deletion with a confirmation step. Fields masked by default; reveal is an explicit action.
+- `include_in_discovery` toggle is labeled clearly (e.g. "Use for discovery") and accompanied by a one-line explanation of what it enables.
+- Deleting a field that is currently in an active discovery invocation shows a warning explaining why the delete is blocked (from `PersonalFieldService.removeField`, ATL-204).
+- No plaintext field value appears in a page title, URL, breadcrumb, log, or analytics event.
+- All states handled: loading, empty (no fields yet), error, keyboard-only, responsive.
+- Upgrade-onboarding path: if a user arrives at the Identity Profile step with `onboarding_completed_at` already set (completed onboarding before M13 deployed), the Identity Profile step is presented as an upgrade flow and not skipped. The ATL-016 shell routing enforces completion of this step and the downstream ATL-210/ATL-211 steps before the user is admitted to the Dashboard on that session; the presence of `onboarding_completed_at` alone does not bypass this requirement.
+
+**Testing:** add/toggle/delete field end to end; `include_in_discovery` toggle reflected in service layer; mask/reveal; field-in-use delete blocked; keyboard-only flow; no sensitive value in URLs or page titles; upgrade-onboarding path routes a pre-M13 user through Identity Profile before Dashboard.
+
+---
+
+### ATL-210 · Discovery consent and disclosure UI
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-205, ATL-209
+
+**Objective:** Build the consent grant and first-disclosure acknowledgment flows in onboarding and in Settings > Discovery (FR-16, FR-02): display the three distinct disclosure-type notices, gate discovery start on active consent, and surface consent management in settings.
+
+**Acceptance criteria**
+
+- Onboarding — hashed-query consent (HIBP): the notice explains that a partial hash derived from the email address (not the plaintext email) is transmitted; no per-field acknowledgment dialog is presented for this provider class (ADR-008 §3); a single consent-grant confirmation is required before the discovery run.
+- Onboarding — identifying provider: a first-disclosure acknowledgment dialog shows the exact handle value and named provider before the first transmission of each `(field, provider)` pair. Cancelling blocks only that invocation; it does not modify the field value, `include_in_discovery`, or standing consent.
+- Broker-search queries are not part of the initial onboarding discovery run and are not surfaced here.
+- Settings > Discovery: list active consents with provider class and grant date; revoke consent per provider class behind a confirmation modal that explains consequences; view first-disclosure acknowledgment history per field and provider.
+- Revoking consent in Settings does not cancel in-progress runs that have already passed dispatch; the UI explains this.
+- All consent grant and revoke actions are confirmed in a modal before the service call.
+- States: loading, no-consents-yet, active-consent-list, revoke-confirmation, acknowledgment-history.
+
+**Testing:** hashed-query notice shown without per-field dialog; identifying-provider dialog shown for each field; cancel blocks invocation only (field value and consent unchanged); revoke consent reflected in Settings; keyboard-only flow through both consent paths.
+
+---
+
+### ATL-211 · Candidate adjudication UI
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** L · **Depends on:** ATL-208, ATL-210
+
+**Objective:** Build the candidate adjudication surface used in onboarding and in the Discover section (FR-16): a structured list of pending candidates with evidence, four adjudication actions, and a separate display path for aggregator-attributed exposure evidence.
+
+**Acceptance criteria**
+
+- Pending candidate card: proposed service name (derived from evidence; labeled as a proposal, never as a confirmed account), evidence source, provider class, confidence, and the data categories or signals surfaced.
+- Four adjudication actions presented clearly on each candidate card: Confirm, Reject, Dismiss, Not sure. No action is buried in a secondary menu on the initial card view.
+- Aggregator-attributed evidence (`is_aggregator_attributed = true`): displayed as an evidence notice in a separate section. No Confirm/Reject/Dismiss/Not sure actions — there is no account candidate to adjudicate.
+- Adjudication is optional at onboarding; the user may proceed to the Dashboard with all candidates deferred. A "Skip for now" path is unambiguous.
+- Post-adjudication behavior: rejected candidate disappears immediately; dismissed candidate moves to a lower-urgency section; not-sure candidate stays in the list with a visual indicator; confirmed candidate transitions to an inline success state and links to the new digital asset.
+- De-confirmation on a confirmed asset (within the Digital Assets detail view) calls `CandidateAdjudicationService.deconfirm`; shows consequences and requires confirmation.
+- No candidate card or evidence notice contains the plaintext email address used in the query.
+- All states handled: loading, empty (no pending candidates), single candidate, multi-candidate, error, keyboard-only.
+
+**Testing:** four actions functional and mapped to correct service calls; aggregator evidence section with no adjudication actions; deferred candidates remain in Discover; rejected candidate removed from list; de-confirmation flow; keyboard-only completion; sensitive values absent from rendered output.
+
+---
+
+### ATL-212 · Discover surface and navigation
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-211, ATL-019
+
+**Objective:** Add the Discover section to primary navigation (§12 IA): aggregates pending candidates, aggregator-attributed evidence, and discovery run status in one surface; integrates discovery status into the Dashboard where appropriate.
+
+**Acceptance criteria**
+
+- Discover appears in primary navigation. Navigation label and exact position are design decisions; this ticket implements the capability grouping defined in §12 IA (Identity Profile, discovery run status, candidate adjudication, exposure evidence).
+- The Discover surface entry point shows a pending-candidate count badge when candidates are awaiting adjudication. The badge updates after an adjudication action without a full page reload.
+- Discovery run status is shown inside the Discover surface: pending, running (with progress indication), and terminal states (completed, partial, blocked, failed) with an appropriate status description.
+- Confirmed candidates that have become digital assets do not appear in the Discover surface.
+- The Dashboard reflects an active discovery run (e.g., a status indicator or metric card note) when a run is in progress; the exact treatment is a design decision.
+- Discovery run status is updated on navigation or explicit user refresh. Automatic polling is out of scope for MVP; automated re-run scheduling (periodic evidence refresh) is a Phase 3 capability (PRD §15) and is not implemented or stubbed by this ticket.
+- Entry points to Identity Profile and consent settings are accessible from the Discover surface.
+- All states: loading, no-pending-candidates empty state, pending-candidates list, run-in-progress, run-completed.
+
+**Testing:** pending count badge updates after adjudication; confirmed candidates absent from surface; run-in-progress state shown; keyboard navigation through Discover; empty state correct; Dashboard run-status indicator shown during active run.
+
+---
+
+### ATL-214 · Discovery-first end-to-end core journey tests
+
+**Epic:** Quality · **Priority:** P0 · **Complexity:** XL · **Depends on:** ATL-211, ATL-092
+
+**Objective:** Extend the ATL-092 suite with the discovery-first primary onboarding journey (PRD §9.1 steps 1–9): Identity Profile construction, field-for-discovery selection, discovery consent (hashed-query and identifying-provider paths), initial discovery run, and optional candidate adjudication. Also covers the upgrade-onboarding path for users who completed pre-M13 onboarding. This ticket makes the canonical discovery-first journey exercisable end-to-end in CI.
+
+**Acceptance criteria**
+
+- Discovery-first onboarding path automated end to end: Identity Profile field entry, `include_in_discovery` toggle, consent grant (hashed-query and identifying-provider notices), discovery run completion, and candidate adjudication with at least Confirm and Dismiss actions exercised.
+- Deferred-adjudication path: user skips adjudication at onboarding; Dashboard shows no findings for deferred candidates; Discover surface shows pending candidates.
+- Upgrade-onboarding path: a user with `onboarding_completed_at` set but no Identity Profile fields is routed through the Identity Profile, consent, and discovery steps before reaching the Dashboard.
+- Confirmed candidate appears in the digital asset inventory and is eligible for the findings pipeline.
+- No discovery-originated plaintext email address or field value appears in a URL, page title, or log during any automated journey.
+- Flake rate <2% over 20 runs.
+
+**Testing:** the ticket is the suite; all journeys run against a staging-like environment with seeded HIBP stub responses.
