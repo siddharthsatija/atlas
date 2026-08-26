@@ -49,7 +49,7 @@ add constraint digital_assets_source_type_check check (source_type in ('manual',
 alter table public.digital_assets
 add column candidate_id uuid;
 
-comment on column public.digital_assets.candidate_id is 'FK to discovery_candidates (id), populated only when source_type = ''discovery''. ' 'The foreign key constraint itself is added by ATL-202 once discovery_candidates ' 'exists (deferred forward reference per ATL-200 ticket). The pairing constraint ' 'below enforces that discovery rows carry a non-null value and non-discovery ' 'rows carry null.';
+comment on column public.digital_assets.candidate_id is 'FK to discovery_candidates (id), populated only when source_type = ''discovery''. The foreign key constraint itself is added by ATL-202 once discovery_candidates exists (deferred forward reference per ATL-200 ticket). The pairing constraint below enforces that discovery rows carry a non-null value and non-discovery rows carry null.';
 
 -- 1c. Add deleted_at for soft-deletion in the de-confirmation flow (ADR-007 §9).
 --
@@ -60,7 +60,7 @@ comment on column public.digital_assets.candidate_id is 'FK to discovery_candida
 alter table public.digital_assets
 add column deleted_at timestamptz;
 
-comment on column public.digital_assets.deleted_at is 'Soft-deletion timestamp set by the de-confirmation flow (ATL-208, ADR-007 §9). ' 'NULL means the asset row is live. Score computation, asset listing, and the ' 'request-origination flow must filter out rows where deleted_at IS NOT NULL.';
+comment on column public.digital_assets.deleted_at is 'Soft-deletion timestamp set by the de-confirmation flow (ATL-208, ADR-007 §9). NULL means the asset row is live. Score computation, asset listing, and the request-origination flow must filter out rows where deleted_at IS NOT NULL.';
 
 -- 1d. Conditional pairing constraint (ADR-007 §7).
 --
@@ -156,7 +156,7 @@ add constraint privacy_findings_discovery_refs_valid check (
 alter table public.user_encryption_keys
 add column key_purpose text not null default 'content' check (key_purpose in ('content', 'rejection'));
 
-comment on column public.user_encryption_keys.key_purpose is 'content = AES-256-GCM DEK (original behavior, all existing rows). ' 'rejection = HMAC-SHA256 key for rejection fingerprints (ATL-203, ADR-008 §8). ' 'Additional purposes require a new or amended ADR. ' 'destroyAllForUser must remain purpose-agnostic and destroy all purposes.';
+comment on column public.user_encryption_keys.key_purpose is 'content = AES-256-GCM DEK (original behavior, all existing rows). rejection = HMAC-SHA256 key for rejection fingerprints (ATL-203, ADR-008 §8). Additional purposes require a new or amended ADR. destroyAllForUser must remain purpose-agnostic and destroy all purposes.';
 
 -- 3b. Replace the one-active-per-user index with one-active-per-(user_id, key_purpose).
 --
@@ -185,7 +185,7 @@ where
 alter table public.user_personal_fields
 add column include_in_discovery boolean not null default false;
 
-comment on column public.user_personal_fields.include_in_discovery is 'User preference: whether this specific field may be offered to discovery ' 'providers (ADR-007 §5). Not a consent substitute — the relevant discovery ' 'consent must also be active and the field type must be eligible for the ' 'provider. Defaults to false: supply is not automatic inclusion.';
+comment on column public.user_personal_fields.include_in_discovery is 'User preference: whether this specific field may be offered to discovery providers (ADR-007 §5). Not a consent substitute — the relevant discovery consent must also be active and the field type must be eligible for the provider. Defaults to false: supply is not automatic inclusion.';
 
 -- ============================================================
 -- 5. consents
