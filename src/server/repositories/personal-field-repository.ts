@@ -46,6 +46,8 @@ export interface PersonalFieldRecord {
   fieldKey: PersonalFieldKey;
   label: string;
   lastUsedAt: string | null;
+  /** ATL-204: whether this field is included in the discovery dispatch engine's eligible set. */
+  includeInDiscovery: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,7 +72,8 @@ export class PersonalFieldStoreError extends Error {
   }
 }
 
-const COLUMNS = "id, user_id, field_key, label, last_used_at, created_at, updated_at";
+const COLUMNS =
+  "id, user_id, field_key, label, last_used_at, created_at, updated_at, include_in_discovery";
 
 export class PersonalFieldRepository {
   private readonly db: SupabaseClient<Database>;
@@ -250,6 +253,106 @@ export class PersonalFieldRepository {
     if (error) throw new PersonalFieldStoreError("mark used");
     return (data ?? []).length;
   }
+
+  // ---------------------------------------------------------------------------
+  // ATL-204: discovery eligibility
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Toggles `include_in_discovery` on one field.
+   *
+   * Only updates the `include_in_discovery` column. `value_encrypted` is never
+   * re-encrypted and the record id does not change, so the AAD binding is
+   * preserved exactly as it was created (ADR-008 §7). Ownership is enforced by
+   * the `user_id` filter in the query.
+   *
+   * Returns `null` when the row is absent or belongs to another user, so the
+   * caller receives the same response for both — non-oracle behaviour
+   * established by ATL-030.
+   */
+  async setIncludeInDiscovery(
+    userId: string,
+    fieldId: string,
+    enabled: boolean,
+  ): Promise<PersonalFieldRecord | null> {
+    const { data, error } = await this.db
+      .from("user_personal_fields")
+      .update({ include_in_discovery: enabled })
+      .eq("user_id", userId)
+      .eq("id", fieldId)
+      .select(COLUMNS)
+      .maybeSingle();
+
+    if (error) throw new PersonalFieldStoreError("setIncludeInDiscovery");
+    return data ? toRecord(data) : null;
+  }
+
+  /**
+   * All fields for a user that have `include_in_discovery = true`.
+   *
+   * Returns records only — no values. The dispatch engine calls `readValue` for
+   * each field it actually uses; returning values here would force decryption of
+   * the full eligible set even when the caller only needs the field list.
+   *
+   * Ordered newest-first (same tiebreak as `list`) so the eligible set is stable
+   * under concurrent inserts.
+   */
+  async listEligible(userId: string): Promise<PersonalFieldRecord[]> {
+    const { data, error } = await this.db
+      .from("user_personal_fields")
+      .select(COLUMNS)
+      .eq("user_id", userId)
+      .eq("include_in_discovery", true)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
+
+    if (error) throw new PersonalFieldStoreError("listEligible");
+    return (data ?? []).map(toRecord);
+  }
+
+  /**
+   * Whether any in-progress discovery invocation references this field.
+   *
+   * "In-progress" is the ATL-201 lifecycle invariant: `invocation_status IS NULL`
+   * in `discovery_provider_invocations`. Terminal values (`success`, `blocked`,
+   * `error`, `rate_limited`) are not in-progress and do not block deletion.
+   *
+   * Two queries rather than a JOIN, because the composite FK on
+   * `discovery_provider_invocation_fields` uses `(user_id, invocation_id)` and
+   * PostgREST join filtering on composite keys is fragile across client versions.
+   * Both queries are indexed: `discovery_provider_invocation_fields_field_idx` on
+   * `(user_id, field_id)` and the primary key on `discovery_provider_invocations`.
+   *
+   * **Fail-closed contract**: any query error throws `PersonalFieldStoreError`.
+   * The caller must treat a thrown error as a blocked deletion. A lookup failure
+   * must never be treated as "no active reference found" — that would allow
+   * deletion to corrupt an active run whose status could not be confirmed.
+   */
+  async hasActiveInvocationReference(userId: string, fieldId: string): Promise<boolean> {
+    // Step 1: all invocation_ids for this (user, field) pair.
+    const { data: fieldRefs, error: fieldError } = await this.db
+      .from("discovery_provider_invocation_fields")
+      .select("invocation_id")
+      .eq("user_id", userId)
+      .eq("field_id", fieldId);
+
+    if (fieldError) throw new PersonalFieldStoreError("hasActiveInvocationReference");
+    if (!fieldRefs || fieldRefs.length === 0) return false;
+
+    const invocationIds = fieldRefs.map((r) => r.invocation_id);
+
+    // Step 2: any of those invocations still non-terminal?
+    const { data: active, error: activeError } = await this.db
+      .from("discovery_provider_invocations")
+      .select("id")
+      .eq("user_id", userId)
+      .in("id", invocationIds)
+      .is("invocation_status", null)
+      .limit(1);
+
+    if (activeError) throw new PersonalFieldStoreError("hasActiveInvocationReference");
+    return (active ?? []).length > 0;
+  }
 }
 
 interface PersonalFieldRow {
@@ -260,6 +363,7 @@ interface PersonalFieldRow {
   last_used_at: string | null;
   created_at: string;
   updated_at: string;
+  include_in_discovery: boolean;
 }
 
 /**
@@ -276,6 +380,7 @@ function toRecord(row: PersonalFieldRow): PersonalFieldRecord {
     fieldKey: row.field_key as PersonalFieldKey,
     label: row.label,
     lastUsedAt: row.last_used_at,
+    includeInDiscovery: row.include_in_discovery,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

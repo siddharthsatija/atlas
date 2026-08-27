@@ -5,7 +5,7 @@ import type { Database } from "@/types/database.generated";
 import type { ApiErrorCode } from "@/lib/api/response-envelope";
 import { maskValue } from "@/lib/formatting/mask";
 import type { PersonalFieldKey } from "@/lib/personal-fields";
-import { AuditWriter } from "@/server/audit/audit-writer";
+import { AuditWriter, emitEvent } from "@/server/audit/audit-writer";
 import { ConsentService } from "@/server/consent/consent-service";
 import { createServiceRoleClient } from "@/server/db/service-role-client";
 import {
@@ -52,6 +52,20 @@ export type PersonalFieldResult<T> = { ok: true; data: T } | { ok: false; code: 
 
 const ok = <T>(data: T): PersonalFieldResult<T> => ({ ok: true, data });
 const fail = <T>(code: ApiErrorCode): PersonalFieldResult<T> => ({ ok: false, code });
+
+/**
+ * A field as the discovery dispatch engine sees it: identity, type, and plaintext
+ * value ready for provider calls (ATL-204, ADR-007 §5).
+ *
+ * Never log this type. The `value` is the raw plaintext from the encrypted store.
+ */
+export interface DiscoveryEligibleField {
+  id: string;
+  userId: string;
+  fieldKey: PersonalFieldKey;
+  /** Decrypted plaintext. Must never reach a log sink. */
+  value: string;
+}
 
 /** A field as a settings surface sees it: identified, labelled, masked. */
 export interface MaskedPersonalField extends PersonalFieldRecord {
@@ -265,6 +279,143 @@ export class PersonalFieldService {
    * (`require-user.ts` "auth.verify_session", `asset-service.ts`
    * "asset.read_identifier"); this does not add a third.
    */
+
+  // ---------------------------------------------------------------------------
+  // ATL-204: discovery eligibility and field removal
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Toggles discovery eligibility for one personal field.
+   *
+   * `include_in_discovery` is a preference, not consent (ADR-007 §5): it records
+   * whether the user wants this field included in the dispatch engine's eligible
+   * set. It is independent of the consent gate that governs storage — a field
+   * can be stored but not in discovery, or vice versa.
+   *
+   * **Not consent-gated.** The preference is about the *use* of an already-stored
+   * field, not the creation of new storage. Gating it would prevent a person from
+   * disabling discovery for a field they decided not to share — the opposite of
+   * the privacy-safe direction.
+   *
+   * Emits `personal_field.discovery_toggled` with `{ enabled }` as context after
+   * a successful update. The event is never emitted on failure, so the audit trail
+   * never records a toggle that did not happen. Field label, value, and key are
+   * never included in the context (ADR-008 §8).
+   *
+   * Missing or foreign field → `NOT_FOUND`, following ATL-030's non-oracle rule.
+   */
+  async setIncludeInDiscovery(
+    userId: string,
+    fieldId: string,
+    enabled: boolean,
+  ): Promise<PersonalFieldResult<PersonalFieldRecord>> {
+    try {
+      const updated = await this.fields.setIncludeInDiscovery(userId, fieldId, enabled);
+      if (!updated) return fail("NOT_FOUND");
+
+      await emitEvent(
+        {
+          audit: {
+            userId,
+            eventType: "personal_field.discovery_toggled",
+            actorType: "user",
+            entityType: "personal_field",
+            entityId: fieldId,
+            context: { enabled },
+          },
+        },
+        this.audit,
+      );
+
+      return ok(updated);
+    } catch (error) {
+      return this.storeFailure("personalfields.setdiscovery", error);
+    }
+  }
+
+  /**
+   * All eligible personal fields for the dispatch engine, with plaintext values.
+   *
+   * "Eligible" means `include_in_discovery = true` in `user_personal_fields`.
+   * This is a preference, not consent (ADR-007 §5): the consent gate that governs
+   * storage is deliberately absent here. The caller is the dispatch engine, which
+   * has already established that the user's account is active; re-checking consent
+   * would prevent a field the person specifically enrolled from being used.
+   *
+   * Returns plaintext — the dispatch engine cannot operate on ciphertext. Plaintext
+   * must never reach a log sink. The logger call in `storeFailure` never carries
+   * values; callers must not log the returned `DiscoveryEligibleField` records.
+   *
+   * A field that disappears between `listEligible` and `readValue` (deleted
+   * concurrently) is silently skipped — the eligible set is a snapshot, not a
+   * guarantee. Zero eligible fields returns a successful empty array.
+   *
+   * Cross-user call: returns an empty array rather than an error, following the
+   * non-oracle pattern `getDiscoveryEligibleFields` inherits from `listMasked`.
+   */
+  async getDiscoveryEligibleFields(
+    userId: string,
+  ): Promise<PersonalFieldResult<DiscoveryEligibleField[]>> {
+    try {
+      const records = await this.fields.listEligible(userId);
+      const eligible: DiscoveryEligibleField[] = [];
+
+      for (const record of records) {
+        const value = await this.fields.readValue(userId, record.id);
+        if (value === null) continue; // race: field removed between list and read
+        eligible.push({
+          id: record.id,
+          userId: record.userId,
+          fieldKey: record.fieldKey,
+          value,
+        });
+      }
+
+      return ok(eligible);
+    } catch (error) {
+      return this.storeFailure("personalfields.geteligible", error);
+    }
+  }
+
+  /**
+   * Hard-deletes one field, blocking when an in-progress discovery invocation
+   * references it (ATL-204, ATL-201).
+   *
+   * Complements, and does not replace, `remove()`. The settings page calls
+   * `remove()`; ATL-209's discovery UI calls `removeField()`. Both are hard
+   * deletes; the difference is the blocking check this method performs first.
+   *
+   * **Not consent-gated.** Deletion is the safe direction: a gate here would
+   * prevent a person who revoked consent from removing the values that revocation
+   * was about. ADR-002 §14 makes every field deletable at any time.
+   *
+   * **In-progress block.** An in-progress invocation is one whose
+   * `invocation_status IS NULL` in `discovery_provider_invocations` (ATL-201
+   * lifecycle invariant). Terminal invocations — `success`, `blocked`, `error`,
+   * `rate_limited` — do not block deletion. The field's FK on
+   * `discovery_provider_invocation_fields` carries no `ON DELETE CASCADE`; this
+   * service method is the guard that prevents deletion while a live run depends
+   * on the field.
+   *
+   * **Fail-closed.** If the blocking lookup itself throws, this method returns
+   * `UNAVAILABLE` via `storeFailure`. A lookup failure must never be treated as
+   * "no active reference found" — that would allow deletion to corrupt an active
+   * run whose status could not be confirmed.
+   *
+   * Missing or foreign field → `NOT_FOUND`, following ATL-030's non-oracle rule.
+   */
+  async removeField(userId: string, fieldId: string): Promise<PersonalFieldResult<{ id: string }>> {
+    try {
+      const blocked = await this.fields.hasActiveInvocationReference(userId, fieldId);
+      if (blocked) return fail("FIELD_IN_USE");
+
+      const removed = await this.fields.remove(userId, fieldId);
+      return removed ? ok({ id: fieldId }) : fail("NOT_FOUND");
+    } catch (error) {
+      return this.storeFailure("personalfields.removefield", error);
+    }
+  }
+
   private storeFailure<T>(operation: string, error: unknown): PersonalFieldResult<T> {
     logger.error("personal_field.store_failed", {
       operation,

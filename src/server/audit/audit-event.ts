@@ -59,6 +59,19 @@ export const AUDIT_EVENT_TYPES = [
   "personal_field.revealed",
 
   /**
+   * Discovery eligibility toggled for one personal field (ATL-204, ADR-007 §5).
+   *
+   * `include_in_discovery` is a preference, not consent: it governs whether a
+   * stored field is included in the dispatch engine's eligible set. Toggling it
+   * in either direction is an explicit user act that the audit trail must record.
+   *
+   * Context carries only `{ enabled }` — the new boolean state — plus the entity
+   * identifier the writer adds. No field value, label, or key is included:
+   * ADR-008 §8 forbids plaintext personal field values from all audit context.
+   */
+  "personal_field.discovery_toggled",
+
+  /**
    * Finding resolution (ATL-042).
    *
    * ADR-006's MVP inventory did not name it, and the decision to add it was
@@ -153,6 +166,15 @@ export const AUDIT_CONTEXT_POLICY: FieldPolicy = {
   // Fixed vocabularies
   consentType: scalar(matches(/^[a-z][a-z0-9_]{0,63}$/)),
   method: scalar(matches(/^[a-z][a-z0-9_]{0,31}$/)),
+
+  /**
+   * Boolean flag for toggle events (ATL-204).
+   *
+   * Used by `personal_field.discovery_toggled` to record the new state of
+   * `include_in_discovery`. A plain boolean predicate rather than `isInt` or
+   * `matches`, because a boolean is not an integer and is not a string.
+   */
+  enabled: scalar((value) => typeof value === "boolean"),
 };
 
 function matches(pattern: RegExp): (value: unknown) => boolean {

@@ -92,6 +92,20 @@ export const API_ERROR_CODES = [
    * concurrency is not exposed as its own condition.
    */
   "REQUEST_INVALID_TRANSITION",
+  /**
+   * The requested field cannot be deleted because it is currently referenced by
+   * an in-progress discovery invocation (ATL-204, ATL-201).
+   *
+   * The remedy is distinct from all other codes: the caller must wait until the
+   * active invocation reaches a terminal state (`success`, `blocked`, `error`, or
+   * `rate_limited`) before retrying. `NOT_FOUND` would be wrong — the field
+   * exists. `FORBIDDEN` would be wrong — the remedy is temporal, not
+   * authorisation. `REQUEST_INVALID_TRANSITION` is the closest analogue (a
+   * well-formed request that state forbids), but a field deletion is not a
+   * transition in the request lifecycle, and conflating the two would prevent
+   * surfaces from offering the right message and retry control.
+   */
+  "FIELD_IN_USE",
   /** A dependency is unavailable. Never carries the provider's own message. */
   "UNAVAILABLE",
 ] as const;
