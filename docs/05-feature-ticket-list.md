@@ -23,7 +23,7 @@ A ticket is done only when acceptance criteria pass, authorization and validatio
 | M3        | Security infrastructure                  | 084, 085, 103, 104, 078, 086, 087, 068, 069                                    |
 | M4        | Onboarding and demo data                 | 016, 017, 018, 083                                                             |
 | M5        | Digital assets                           | 027, 028, 029, 030, 031, 032, 033, 035, 034, 036, 037                          |
-| M6        | Findings and score                       | 038, 101, 102, 039, 040, 041, 042, 043, 044, 045, 046, 047                     |
+| M6        | Findings and score                       | 038, 101, 102, 039, 040, 041, 042, 043, 213, 044, 045, 046, 047                |
 | M7        | AI subsystem                             | 048, 050, 051, 049, 052, 055, 053, 054, 109, 089                               |
 | M8        | Requests, personal fields, notifications | 105, 106, 056, 057, 058, 059, 060, 061, 062, 063, 064, 065, 067, 107, 108, 066 |
 | M9        | Dashboard                                | 019, 020, 021, 022, 023, 024, 025, 026                                         |
@@ -419,16 +419,18 @@ A ticket is done only when acceptance criteria pass, authorization and validatio
 
 **Epic:** Onboarding · **Priority:** P0 · **Complexity:** L · **Depends on:** ATL-012, ATL-015, ATL-078
 
-**Objective:** Purpose/limitations, privacy goal, asset categories, demo-or-add choice, and completion steps per frontend §17, including AI-processing consent capture.
+**Objective:** Build the onboarding shell and implement the discovery-independent steps per PRD §9.1: purpose/limitations disclosure (step 2) and privacy goal selection (step 3), including AI-processing consent capture. The shell provides the step container, progress indicator, back/skip controls, and routing infrastructure; it is designed as an extensible framework so that M13 tickets (ATL-209 Identity Profile, ATL-210 discovery consent, ATL-211 candidate adjudication) install additional steps without restructuring the shell. The full discovery-first onboarding journey (PRD §9.1 steps 1–9) becomes operational once ATL-211 completes. The demo path (ATL-018) is routed from this shell; the consent step that triggers the branch is ATL-210's responsibility.
 
 **Acceptance criteria**
 
-- Steps match frontend §17 with progress indicator, back, and safe skip; no sensitive fields requested.
+- Shell renders the pre-discovery steps (purpose/limitations, privacy goal) with a progress indicator, back navigation, and safe skip; step order is defined in the shell so M13 tickets can extend it.
 - `ai_processing` consent captured with policy version before any AI feature is usable.
 - Limitations copy states what Atlas does not do (no scanning, no guaranteed deletion).
-- Completion sets `onboarding_completed_at` and routes to the dashboard.
+- The shell defines a routing slot at the discovery-consent step: users who decline are routed to demo mode (ATL-018, which must be complete before this ticket can be E2E-tested for that branch); users who proceed advance into the discovery steps installed by ATL-210/ATL-211.
+- Manual asset addition is not offered as an onboarding path; it is available as a fallback throughout the product for discovery misses after onboarding completes.
+- `onboarding_completed_at` is set by the shell after the user has completed all installed onboarding steps at the time of completion. This is an incremental-development convenience: at M4 only the pre-discovery steps are installed, so the flag may be set without discovery completion. Once ATL-209–ATL-211 are deployed (M13), the shell routing logic must evaluate outstanding steps against all installed steps — not only against this flag — so that any user who lacks a complete Identity Profile (at least one field with `include_in_discovery = true`) or has no active discovery consent is routed through those steps before reaching the Dashboard, regardless of whether the flag is already set. The flag alone is never a sufficient bypass condition once discovery steps are installed.
 
-**Testing:** E2E full flow and skip paths; consent row assertion; axe checks per step.
+**Testing:** Shell renders pre-discovery steps with correct navigation controls; `ai_processing` consent row asserted; demo-branch routing slot verified; axe checks per step.
 
 ### ATL-017 · Onboarding persistence
 
@@ -731,10 +733,26 @@ A ticket is done only when acceptance criteria pass, authorization and validatio
 
 **Acceptance criteria**
 
-- Optional reason captured (incorrect, not relevant, accepted risk); undo restores open state.
+- Optional reason captured (`not_relevant` or `accepted_risk`); undo restores open state. `incorrect` is not a dismissal reason — it routes the user to the underlying record for data correction (see ATL-213).
 - Dismissal does not improve the score (deduction retained until condition clears); UI explains this honestly.
 
-**Testing:** dismiss/undo tests; score-unchanged assertion.
+**Testing:** dismiss/undo tests; score-unchanged assertion; confirm `incorrect` is not offered as a dismiss option.
+
+### ATL-213 · Incorrect-finding correction path
+
+**Epic:** Findings · **Priority:** P1 · **Complexity:** M · **Depends on:** ATL-043, ATL-041, ATL-102
+
+**Objective:** Implement the `incorrect` correction flow per OQ-04: when a user disputes a finding as incorrect, navigate them to the underlying record that generated the finding, let them correct the data, and allow ATL-102 auto-resolution to clear the finding if the corrected data satisfies the predicate.
+
+**Acceptance criteria**
+
+- A distinct "Incorrect — correct the underlying data" affordance is present on the finding card or detail panel (separate from the Dismiss action, which offers only `not_relevant` and `accepted_risk`).
+- Selecting it navigates the user to the relevant underlying record (digital asset detail, personal field, or permission record — whichever the finding's `rule_id` evaluates against).
+- No deduction is removed by this action alone; the score changes only if the corrected data causes ATL-102 to auto-resolve the finding with `resolved_by = system`.
+- Until the user corrects the data, the finding remains open and the deduction stands (option (a) behavior per OQ-04).
+- The correction affordance is distinct in labeling from `accepted_risk` and `not_relevant`; copy makes clear that only fixing the data will clear the finding.
+
+**Testing:** correction affordance navigates to correct record; no score change from navigation alone; score changes after data correction that clears the predicate; finding stays open when corrected data does not clear the predicate.
 
 ### ATL-044 · Score model v1
 
@@ -1485,11 +1503,11 @@ A single range qual — no disjunction, therefore no `BitmapOr` candidate, there
 
 **Epic:** Quality · **Priority:** P0 · **Complexity:** XL · **Depends on:** M4–M11
 
-**Objective:** Automate: onboarding, add asset, review finding, generate/edit draft, mark sent, follow-up notification, export, account deletion.
+**Objective:** Automate the core E2E journeys available through M11: onboarding shell (pre-discovery steps and demo path), digital asset management (manual entry as the fallback path available at this stage), review finding, generate/edit request draft, mark sent, follow-up notification, data export, and account deletion. The discovery-first primary onboarding journey (Identity Profile, consent, discovery run, adjudication) requires M13 capabilities and is covered by ATL-214 after ATL-211 completes.
 
 **Acceptance criteria**
 
-- All architecture §17 E2E journeys automated against staging-like environment, including AI-unavailable variant.
+- All M4–M11 E2E journeys automated against a staging-like environment; includes AI-unavailable variant and demo path.
 
 **Testing:** the ticket is the suite; flake rate <2% over 20 runs.
 

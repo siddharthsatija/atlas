@@ -68,10 +68,13 @@ Final choices for transactional email, analytics, error monitoring, and the rate
 
 The PRD defines no monetization. Not an MVP blocker for a validation launch, but the answer affects Phase 2 scope (connectors and the service directory are costly) and should exist before Phase 2 planning.
 
-## OQ-11 · What makes a finding "verified"
+## OQ-11 · What makes a finding "verified" — **partially resolved by ADR-007 §10**
 
 Frontend §8 reserves critical styling for "genuinely critical, **verified** findings" and the design system reserves danger for "verified critical risk", but no document defines verification and `privacy_findings` has no column for it.
 
 - Product decision (ATL-040): **do not overload `confidence` or `source_type` to mean verified.** Confidence is the minimum certainty across a rule's inputs (ADR-001, `confidence.ts`) and `source_type` distinguishes demo data; neither is a statement that a finding was checked.
 - Until an explicit verification model exists, the finding card applies the existing `SeverityBadge` mapping only and adds no additional critical emphasis. The stricter rule ships with the model, not before it.
-- Answering this means deciding what verification would mean — a user confirming the finding is true, a second corroborating source, or something else — and that answer determines whether it is a column, a derived rule, or an ADR.
+
+**What ADR-007 §10 resolves.** ADR-007 §10 defines the verification model. Verification is a property of claims (findings), not objects (assets or users). A finding is verified when every subject referenced in `evidence_refs_json` is either a `discovery_evidence` record or a confirmed `digital_asset`. Verification is computed at read time from the reference graph; it is not stored. ADR-007 Consequences records this resolution: "OQ-11: Verification model — claim-level, computed at read time, not stored."
+
+**What remains open.** Whether verification status gates the critical-emphasis ("danger") styling in the design system is not yet resolved. ATL-040 deferred this to "the stricter rule ships with the model, not before it." The model now exists in ADR-007 §10. The product and design decision — does the verified-at-read-time status from the `evidence_refs_json` traversal gate the existing design system's danger/critical-emphasis style? — still requires a product call before the finding card is implemented. Until that call is made, the finding card continues to apply `SeverityBadge` mapping only, without additional critical-emphasis styling.
