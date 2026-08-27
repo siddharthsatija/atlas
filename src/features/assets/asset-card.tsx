@@ -253,9 +253,13 @@ function AssetActions({
           </DropdownMenuItem>
         )}
 
-        {/* ATL-056 owns requests; `data_requests` has no migration yet. */}
-        <DropdownMenuItem disabled data-action="request">
-          Request deletion
+        {/*
+          Step 1 of the request flow (ATL-058). `asChild` so the item is a real
+          link — the review lives on its own route, and the card's menu should
+          not be the one place navigation behaves differently.
+        */}
+        <DropdownMenuItem asChild data-action="request">
+          <Link href={`/assets/${assetId}/request`}>Request deletion</Link>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

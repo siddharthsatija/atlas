@@ -1,39 +1,37 @@
 import { AssetDetailSection, DetailEmpty } from "./asset-detail-section";
 
 /**
- * Section 6 · Requests (ATL-034, frontend §7) — deferred, and honest about it.
+ * Section 6 · Requests (ATL-034, frontend §7) — still empty, for a narrower
+ * reason than before.
  *
- * ## Why the section exists with nothing in it
+ * ## What changed, and what did not
  *
- * There is no requests subsystem. `data_requests` has no migration, and three
- * places in the codebase already say so rather than pretend otherwise
- * (`privacy-score-service.ts`, `src/server/ai/README.md`,
- * `improvement-actions.test.ts`). ATL-056 and ATL-057 own it, in M8.
+ * The requests subsystem now exists: ATL-056 created `data_requests`, ATL-057
+ * enforced its lifecycle, and ATL-058 built Step 1 so a person can prepare a
+ * deletion request from the header above. What does **not** exist is the list
+ * that belongs in this section — `RequestService` has no per-asset read for it,
+ * and ATL-065 owns request detail.
  *
- * The section is still rendered, in position 6, for the reason the ATL-005
- * placeholder routes and the asset card's disabled controls exist: the shape of
- * the page is a promise about where things live. Omitting it would move every
- * section below it, and M8 would then have to reopen the layout, the focus order
- * and the E2E selectors to put it back. Present-and-empty costs one collapsed
- * section now and one copy change later.
+ * So the copy changed and the shape did not. It no longer says Atlas cannot make
+ * requests, because that stopped being true; it says none has been prepared for
+ * this service yet and points at the control that prepares one.
  *
  * ## What the copy may not do
  *
- * It may not imply Atlas can submit a request today, that one is pending, or
- * that anything has been sent. It states the capability is not built and names
- * what a user can do in the meantime, which is nothing here — so it says nothing
- * about what to do here.
+ * It may not imply Atlas sends anything, that a request is pending, or that one
+ * has been sent (security §11, frontend §9). It names the action a person can
+ * take and nothing more.
  *
- * No record shape is defined, no placeholder rows are rendered, and no type
- * describing a request exists in this file. Inventing one would be designing
- * ATL-056 by accident, and the next ticket would inherit a model nobody chose.
+ * No record shape is defined and no placeholder rows are rendered. The list is
+ * ATL-064/ATL-065's, and inventing one here would be designing those tickets by
+ * accident.
  */
 export function AssetDetailRequests() {
   return (
     <AssetDetailSection heading="Requests" slot="asset-section-requests">
       <DetailEmpty>
-        Atlas cannot make data requests yet. When that arrives, correction and deletion requests for
-        this service will appear here.
+        No requests have been prepared for this service yet. Use “Request deletion” above to prepare
+        one — Atlas drafts it for you to send yourself.
       </DetailEmpty>
     </AssetDetailSection>
   );

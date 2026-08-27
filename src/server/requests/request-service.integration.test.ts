@@ -90,6 +90,28 @@ class FakeRequests {
     return row;
   }
 
+  create(input: {
+    userId: string;
+    assetId: string;
+    requestType: DataRequestRecord["requestType"];
+    recipient?: string | undefined;
+    includedFieldKeys?: readonly DataRequestRecord["includedFieldKeys"][number][] | undefined;
+  }): Promise<DataRequestRecord> {
+    if (this.failOn === "create") return Promise.reject(new Error("store down"));
+
+    const row = this.seed({
+      userId: input.userId,
+      assetId: input.assetId,
+      requestType: input.requestType,
+      status: "draft",
+      includedFieldKeys: [...(input.includedFieldKeys ?? [])],
+      hasRecipient: input.recipient !== undefined,
+      hasSubject: false,
+      hasBody: false,
+    });
+    return Promise.resolve({ ...row });
+  }
+
   find(userId: string, requestId: string): Promise<DataRequestRecord | null> {
     if (this.failOn === "find") return Promise.reject(new Error("store down"));
     return Promise.resolve(
@@ -202,6 +224,21 @@ class FakeActivity {
   }
 }
 
+/** ATL-105's vault, as `createDraft` uses it: one best-effort stamp. */
+class FakePersonalFields {
+  marked: { userId: string; fieldIds: readonly string[] }[] = [];
+  failNext = false;
+
+  markUsed(userId: string, fieldIds: readonly string[]): Promise<{ ok: true; data: number }> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error("vault down"));
+    }
+    this.marked.push({ userId, fieldIds });
+    return Promise.resolve({ ok: true, data: fieldIds.length });
+  }
+}
+
 class FakeScore {
   enqueued: { userId: string; reason: string }[] = [];
   failNext = false;
@@ -262,6 +299,7 @@ let audit: FakeAudit;
 let activity: FakeActivity;
 let score: FakeScore;
 let idempotency: FakeIdempotency;
+let personalFields: FakePersonalFields;
 let service: RequestService;
 
 type Deps = ConstructorParameters<typeof RequestService>[0];
@@ -270,6 +308,7 @@ function build(): RequestService {
   return new RequestService({
     requests: requests as unknown as Deps["requests"],
     events: events as unknown as Deps["events"],
+    personalFields: personalFields as unknown as Deps["personalFields"],
     activity: activity as unknown as Deps["activity"],
     audit: audit as unknown as Deps["audit"],
     idempotency: idempotency as unknown as Deps["idempotency"],
@@ -293,6 +332,7 @@ beforeEach(() => {
   activity = new FakeActivity();
   score = new FakeScore();
   idempotency = new FakeIdempotency();
+  personalFields = new FakePersonalFields();
   service = build();
   keyCounter = 0;
 });
@@ -996,5 +1036,149 @@ describe("the three-day sweep (D5)", () => {
     const cutoff = spy.mock.calls[0]?.[0] ?? "";
     const expected = Date.now() - AWAITING_RESPONSE_AFTER_DAYS * DAY_MS;
     expect(Math.abs(new Date(cutoff).getTime() - expected)).toBeLessThan(5_000);
+  });
+});
+
+describe("creating the draft Step 1 prepared (ATL-058)", () => {
+  const validDraft = {
+    userId: ALICE,
+    assetId: ASSET,
+    requestType: "deletion" as const,
+    recipient: "privacy@acme.example",
+    includedFieldKeys: ["email"] as const,
+    fieldIds: ["field-1"],
+  };
+
+  it("creates the request in draft, carrying the approved keys", async () => {
+    const created = expectOk(await service.createDraft(validDraft));
+
+    expect(created.status).toBe("draft");
+    expect(created.includedFieldKeys).toEqual(["email"]);
+    expect(created.hasRecipient).toBe(true);
+  });
+
+  it("stores no subject or body", async () => {
+    /**
+     * Step 1 collects a recipient and approvals; ATL-059 writes the body. All
+     * three encrypted columns are nullable precisely so this state is legal.
+     */
+    const created = expectOk(await service.createDraft(validDraft));
+
+    expect(created.hasSubject).toBe(false);
+    expect(created.hasBody).toBe(false);
+  });
+
+  it("leaves the request in draft rather than advancing it (D6)", async () => {
+    /**
+     * `draft -> ready` means the draft is prepared, which is ATL-060's outcome.
+     * ATL-058 stopping here is what keeps the two tickets separable.
+     */
+    const created = expectOk(await service.createDraft(validDraft));
+
+    expect(created.status).toBe("draft");
+    expect(events.appended).toEqual([]);
+    expect(audit.written).toEqual([]);
+  });
+
+  it("approves nothing when the person ticked nothing", async () => {
+    // FR-08: every field is optional, and unchecked is the default.
+    const created = expectOk(
+      await service.createDraft({ ...validDraft, includedFieldKeys: [], fieldIds: [] }),
+    );
+
+    expect(created.includedFieldKeys).toEqual([]);
+    expect(personalFields.marked).toEqual([]);
+  });
+
+  it("refuses an invalid recipient before writing anything", async () => {
+    expect(await service.createDraft({ ...validDraft, recipient: "not-an-address" })).toEqual({
+      ok: false,
+      code: "INVALID_REQUEST",
+    });
+    expect(requests.rows).toEqual([]);
+  });
+
+  it("refuses a missing recipient before writing anything", async () => {
+    expect(await service.createDraft({ ...validDraft, recipient: "   " })).toEqual({
+      ok: false,
+      code: "INVALID_REQUEST",
+    });
+    expect(requests.rows).toEqual([]);
+  });
+
+  it("refuses a key outside the ADR-002 vocabulary", async () => {
+    /**
+     * The keys govern what may later be sent, so an unrecognised one must not
+     * reach storage. The repository refuses it too; this keeps the database as
+     * the second gate.
+     */
+    expect(
+      await service.createDraft({
+        ...validDraft,
+        includedFieldKeys: ["passport_number"] as unknown as typeof validDraft.includedFieldKeys,
+      }),
+    ).toEqual({ ok: false, code: "INVALID_REQUEST" });
+    expect(requests.rows).toEqual([]);
+  });
+
+  it("stamps last_used_at on the fields it included", async () => {
+    /**
+     * ATL-105 built `markUsed` and left it uncalled, because the only thing that
+     * uses a field is a request draft. This is that draft.
+     */
+    await service.createDraft({ ...validDraft, fieldIds: ["field-1", "field-2"] });
+
+    expect(personalFields.marked).toEqual([{ userId: ALICE, fieldIds: ["field-1", "field-2"] }]);
+  });
+
+  it("writes request.created to the global feed", async () => {
+    await service.createDraft(validDraft);
+
+    expect(activity.written[0]).toMatchObject({
+      type: "request.created",
+      entityType: "data_request",
+    });
+  });
+
+  it("still creates the draft when the activity write fails", async () => {
+    // Best effort (D4). A missing feed row must not cost the person their draft.
+    activity.failNext = true;
+
+    const created = expectOk(await service.createDraft(validDraft));
+
+    expect(created.status).toBe("draft");
+    expect(activity.written).toEqual([]);
+  });
+
+  it("still creates the draft when the usage stamp fails", async () => {
+    /**
+     * `last_used_at` exists so a person can prune unused fields. Losing one hint
+     * must not cost them the request.
+     */
+    personalFields.failNext = true;
+
+    const created = expectOk(await service.createDraft(validDraft));
+
+    expect(created.status).toBe("draft");
+    expect(personalFields.marked).toEqual([]);
+  });
+
+  it("reports a store failure as unavailable", async () => {
+    requests.failOn = "create";
+
+    expect(await service.createDraft(validDraft)).toEqual({ ok: false, code: "UNAVAILABLE" });
+  });
+
+  it("is not idempotency-claimed, so two drafts are two requests", async () => {
+    /**
+     * Deliberate: a person may genuinely start two requests to one service. A
+     * claim keyed on anything stable enough to deduplicate the accidental case
+     * would also refuse the deliberate one.
+     */
+    await service.createDraft(validDraft);
+    await service.createDraft(validDraft);
+
+    expect(requests.rows).toHaveLength(2);
+    expect(idempotency.executions).toBe(0);
   });
 });

@@ -91,24 +91,25 @@ function header({
 }
 
 /**
- * The two §7 controls whose capability does not exist yet, with the tab stop
- * each one occupies.
+ * The §7 control whose capability still does not exist, with the tab stop it
+ * occupies.
  *
- * The header's focus order is Edit (1), Archive (2), Request correction (3),
- * Request deletion (4), More (5) — §7's order, left to right. Pinning the exact
- * stop rather than "reachable within N tabs" means a control that quietly left
- * the tab order, or moved within it, fails here.
+ * The header's focus order is Edit (1), Archive (2), Request deletion (3),
+ * Request correction (4), More (5) — §7's order, left to right. Pinning the
+ * exact stop rather than "reachable within N tabs" means a control that quietly
+ * left the tab order, or moved within it, fails here.
  *
- * Archive left this table in ATL-036 M5 without moving: it is now a real control
- * at the same stop, which is what rendering it unavailable rather than omitting
- * it was for. The stops below are therefore unchanged.
+ * Two controls have left this table by becoming real, and neither was removed
+ * from the header to do it: Archive in ATL-036 M5, and **Request deletion in
+ * ATL-058**, which built Step 1 of the request flow. Deletion now sits at stop 3
+ * as a link, so correction moves to 4 — the one reordering this table records,
+ * and it happened because a live control belongs before an unavailable one.
  */
 const UNAVAILABLE = [
-  ["Request correction", "Atlas cannot make data requests yet.", 3],
-  ["Request deletion", "Atlas cannot make data requests yet.", 4],
+  ["Request correction", "Correction requests are not built yet. Deletion requests are.", 4],
 ] as const;
 
-describe("the one action that works", () => {
+describe("the actions that work", () => {
   it("offers Edit, pointing at the existing edit route", () => {
     header();
 
@@ -120,6 +121,27 @@ describe("the one action that works", () => {
       "href",
       `/assets/${ASSET}/edit`,
     );
+  });
+
+  it("offers Request deletion, pointing at Step 1 of the request flow", () => {
+    /**
+     * ATL-058. A link for the same reason Edit is one — the review lives on its
+     * own route, because frontend §10 requires draft preservation and a modal
+     * whose state vanishes on refresh preserves nothing.
+     */
+    header();
+
+    expect(screen.getByRole("link", { name: `Request deletion: ${SERVICE}` })).toHaveAttribute(
+      "href",
+      `/assets/${ASSET}/request`,
+    );
+  });
+
+  it("no longer says Atlas cannot make data requests", () => {
+    // The claim was true until ATL-058 and is not any more.
+    header();
+
+    expect(screen.queryByText("Atlas cannot make data requests yet.")).not.toBeInTheDocument();
   });
 });
 
@@ -340,6 +362,9 @@ describe("naming", () => {
     for (const [label] of UNAVAILABLE) {
       expect(screen.getByRole("button", { name: `${label}: ${SERVICE}` })).toBeVisible();
     }
+
+    /** Deletion is a link now, and is named the same way. */
+    expect(screen.getByRole("link", { name: `Request deletion: ${SERVICE}` })).toBeVisible();
 
     /** Archive is named the same way, though it is now a live control. */
     expect(

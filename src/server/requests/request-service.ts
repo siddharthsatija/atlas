@@ -9,8 +9,11 @@ import {
   type DeliveryMethod,
   type RequestActorType,
   type RequestStatus,
+  type RequestType,
 } from "@/lib/requests/requests";
 import { recordingFor } from "@/lib/requests/request-transitions";
+import { checkRecipient } from "@/lib/requests/request-draft";
+import { isPersonalFieldKey, type PersonalFieldKey } from "@/lib/personal-fields";
 import { ActivityWriter } from "@/server/activity/activity-writer";
 import { AuditWriter } from "@/server/audit/audit-writer";
 import { createServiceRoleClient } from "@/server/db/service-role-client";
@@ -20,6 +23,7 @@ import {
   type DataRequestRecord,
 } from "@/server/repositories/data-request-repository";
 import { RequestEventRepository } from "@/server/repositories/request-event-repository";
+import { PersonalFieldService } from "@/server/personal-fields/personal-field-service";
 import {
   NoopScoreRecalculationQueue,
   type ScoreRecalculationQueue,
@@ -81,10 +85,18 @@ import {
  *
  * ## Scope
  *
- * Transitions only. `createDraft` and `updateDraft` are ATL-058/ATL-060,
- * `scheduleFollowUp` is ATL-066, and none of them appear here — architecture §9
+ * Transitions (ATL-057) and draft creation (ATL-058). `updateDraft` is ATL-060
+ * and `scheduleFollowUp` is ATL-066; neither appears here — architecture §9
  * lists them under `RequestService`, but a method built before the ticket that
  * defines its behaviour is a guess with a name.
+ *
+ * `createDraft` is deliberately **not** wrapped in an idempotency claim, unlike
+ * every transition. A transition is a move between two states, so repeating one
+ * is either a no-op or a corruption; creating a draft is neither. A person who
+ * genuinely starts two requests to the same service — one for deletion now,
+ * another later — is doing something the product allows, and a claim keyed on
+ * anything stable enough to deduplicate the accidental case would also refuse
+ * the deliberate one. The row is cheap, visible, and cancellable.
  */
 
 export type RequestResult<T> = { ok: true; data: T } | { ok: false; code: ApiErrorCode };
@@ -105,6 +117,40 @@ export const AWAITING_RESPONSE_AFTER_DAYS = 3;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const SWEEP_BATCH_SIZE = 500;
+
+/**
+ * What Step 1 submits (ATL-058).
+ *
+ * `fieldKeys` and `fieldIds` are both present because they answer different
+ * questions: the keys are stored in `included_fields_json` and are what ATL-050's
+ * subset check compares, while the ids are what `markUsed` stamps. Deriving one
+ * from the other here would mean a second read of the vault.
+ */
+export interface CreateDraftInput {
+  userId: string;
+  assetId: string;
+  requestType: RequestType;
+  /** Entered or confirmed by the person, and unverified (FR-08). */
+  recipient: string;
+  /** Approved in this flow. Keys only — values never leave the vault. */
+  includedFieldKeys: readonly PersonalFieldKey[];
+  /** The same fields by id, for the `last_used_at` stamp. */
+  fieldIds: readonly string[];
+}
+
+/**
+ * What Step 1 stored, read back (ATL-058).
+ *
+ * The recipient is decrypted because Step 1 is where it is edited; the keys are
+ * what the checklist re-ticks. Nothing else from the draft is needed to
+ * reconstruct the step.
+ */
+export interface DraftReview {
+  request: DataRequestRecord;
+  /** Null when Step 1 stored none, which the schema permits. */
+  recipient: string | null;
+  includedFieldKeys: readonly PersonalFieldKey[];
+}
 
 export interface TransitionInput {
   userId: string;
@@ -138,6 +184,8 @@ export interface TransitionOutcome {
 interface RequestDependencies {
   requests: DataRequestRepository;
   events: RequestEventRepository;
+  /** ATL-105's vault. Used only to stamp `last_used_at` on included fields. */
+  personalFields: PersonalFieldService;
   activity: ActivityWriter;
   audit: AuditWriter;
   idempotency: IdempotencyService;
@@ -147,6 +195,7 @@ interface RequestDependencies {
 export class RequestService {
   private readonly requests: DataRequestRepository;
   private readonly events: RequestEventRepository;
+  private readonly personalFields: PersonalFieldService;
   private readonly activity: ActivityWriter;
   /**
    * The security-side record. Distinct from `activity`: §12 reserves
@@ -160,6 +209,7 @@ export class RequestService {
   constructor(dependencies: RequestDependencies) {
     this.requests = dependencies.requests;
     this.events = dependencies.events;
+    this.personalFields = dependencies.personalFields;
     this.activity = dependencies.activity;
     this.audit = dependencies.audit;
     this.idempotency = dependencies.idempotency;
@@ -171,11 +221,159 @@ export class RequestService {
     return new RequestService({
       requests: new DataRequestRepository(db),
       events: new RequestEventRepository(db),
+      personalFields: PersonalFieldService.create(db),
       activity: new ActivityWriter(db),
       audit: new AuditWriter(db),
       idempotency: new IdempotencyService(db),
       score: new NoopScoreRecalculationQueue(),
     });
+  }
+
+  /**
+   * Creates the request Step 1 prepared (ATL-058, frontend §10, PRD §9.3).
+   *
+   * The row is written when Step 1 is **submitted**, not when the flow opens: an
+   * abandoned review should leave nothing behind, and the recipient the person
+   * typed has to be stored somewhere before Step 2 can read it back. It lands in
+   * `draft` and stays there — `draft -> ready` means the draft is prepared, which
+   * is ATL-060's outcome, not this one's.
+   *
+   * ## What is stored, and what is not
+   *
+   * `recipient` and `includedFieldKeys` are the two things Step 1 produces. The
+   * subject and body are absent, which is why ATL-056 made all three encrypted
+   * columns nullable. Only **keys** are stored, never values (ADR-002, FR-08) —
+   * the values stay in `user_personal_fields` and reach a draft through ATL-059's
+   * per-request approval, which reads this list.
+   *
+   * ## `markUsed` gets its first caller here
+   *
+   * ATL-105 built the seam and left it deliberately uncalled, because the only
+   * thing that *uses* a field is a request draft. This is that draft. It is best
+   * effort: `last_used_at` exists so a person can see and prune unused fields
+   * (ADR-002), and failing their request because a usage timestamp did not land
+   * would trade the thing they asked for against a hint.
+   */
+  async createDraft(input: CreateDraftInput): Promise<RequestResult<DataRequestRecord>> {
+    /**
+     * Refused before anything is written. The keys are what governs what may
+     * later be sent, so an unrecognised one must not reach storage — the
+     * repository refuses it too, and this keeps the database as the second gate.
+     */
+    for (const key of input.includedFieldKeys) {
+      if (!isPersonalFieldKey(key)) return fail("INVALID_REQUEST");
+    }
+
+    const recipient = checkRecipient(input.recipient);
+    if (!recipient.ok) return fail("INVALID_REQUEST");
+
+    let created: DataRequestRecord;
+
+    try {
+      created = await this.requests.create({
+        userId: input.userId,
+        assetId: input.assetId,
+        requestType: input.requestType,
+        recipient: recipient.recipient,
+        includedFieldKeys: input.includedFieldKeys,
+      });
+    } catch (error) {
+      /**
+       * A foreign or missing asset fails the composite foreign key, which arrives
+       * as a store error rather than a null. Reported as `UNAVAILABLE` rather than
+       * `NOT_FOUND`: distinguishing them would require reading the asset first,
+       * and answering "no such service" to a guessed id is the oracle ATL-030's
+       * rule exists to avoid. The route resolves ownership before it ever gets
+       * here.
+       */
+      return this.storeFailure("request.createdraft", error);
+    }
+
+    await this.afterDraftCreated(created, input.fieldIds);
+
+    return ok(created);
+  }
+
+  /**
+   * Reads back what Step 1 stored, so it can be returned to (ATL-058).
+   *
+   * Frontend §10: "changing selection returns to Step 1". Once the draft exists,
+   * **the row is the source of truth** — there is no other persistence anywhere
+   * in this flow, by design. Before submission the selections live in React state
+   * inside the dialog and nowhere else: not in the URL (security §8 forbids
+   * sensitive values there), not in browser storage, and not in an interim row.
+   *
+   * So this is the whole read path ATL-060 needs to reconstruct the step: the
+   * approved keys from `included_fields_json`, and the recipient decrypted from
+   * its envelope. It exists here rather than in ATL-060 so that ticket inherits a
+   * defined way back instead of inventing a second one.
+   *
+   * The recipient is returned in full because Step 1 is where a person edits it —
+   * a masked value cannot be corrected. That is the same judgement `reveal` makes
+   * for a personal field, minus the audit event: the recipient is the person's own
+   * entry rather than a stored identity value, and §12's inventory covers
+   * sensitive-value *reveals*, which this is not.
+   */
+  async readDraftReview(userId: string, requestId: string): Promise<RequestResult<DraftReview>> {
+    try {
+      const request = await this.requests.find(userId, requestId);
+
+      /** Missing and foreign answer identically — the non-oracle rule. */
+      if (!request) return fail("NOT_FOUND");
+
+      const content = await this.requests.readContent(userId, requestId);
+      if (!content) return fail("NOT_FOUND");
+
+      return ok({
+        request,
+        recipient: content.recipient,
+        includedFieldKeys: request.includedFieldKeys,
+      });
+    } catch (error) {
+      return this.storeFailure("request.readreview", error);
+    }
+  }
+
+  /**
+   * The two records a new draft owes, both best effort (D4).
+   *
+   * Neither can undo the creation. The row is written and is the user's; failing
+   * their request because a timeline entry or a usage stamp did not persist would
+   * lose the thing they actually asked for — the same trade every mutation in
+   * this codebase makes.
+   *
+   * No audit event: ADR-006's inventory covers request **state transitions**, and
+   * creating a draft is not one. No `request_events` row either — that table
+   * records transitions, and ATL-056 deliberately left `created` out of the
+   * transition mapping because a draft has no previous status.
+   */
+  private async afterDraftCreated(
+    request: DataRequestRecord,
+    fieldIds: readonly string[],
+  ): Promise<void> {
+    try {
+      await this.activity.write({
+        userId: request.userId,
+        type: "request.created",
+        entityType: "data_request",
+        entityId: request.id,
+        metadata: { status: request.status, count: request.includedFieldKeys.length },
+      });
+    } catch {
+      logger.error("activity.write_failed", { operation: "request.createdraft", count: 1 });
+    }
+
+    if (fieldIds.length === 0) return;
+
+    try {
+      await this.personalFields.markUsed(request.userId, fieldIds);
+    } catch {
+      /**
+       * A missed stamp costs a person one imprecise "last used" hint in Settings.
+       * It must never cost them the draft.
+       */
+      logger.error("request.markused_failed", { operation: "request.createdraft", count: 1 });
+    }
   }
 
   /**

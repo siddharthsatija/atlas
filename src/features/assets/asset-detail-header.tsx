@@ -57,24 +57,25 @@ import type { AssetActionFormState } from "./asset-action-form";
  *
  * ## What is deliberately absent
  *
- *   - No request model, type or record. ATL-056/057 own it; `data_requests` has
- *     no migration.
  *   - No correction path. OQ-04 routes that through editing the underlying
- *     record, and it is a dedicated follow-up.
+ *     record, and it is a dedicated follow-up. Deletion is wired as of ATL-058.
  *   - The More menu holds no actions, because none exists that is in scope.
  */
 
-/** Copy for the two controls that are present and unavailable. */
+/**
+ * Copy for the one control that is present and still unavailable.
+ *
+ * Deletion moved out of this list in ATL-058, which built Step 1 of the request
+ * flow. Correction stays: `request_type` supports it and the schema stores it,
+ * but OQ-04 routes corrections through editing the underlying record and a
+ * correction *request* is a dedicated follow-up. The reason is worded for what is
+ * actually true now — requests exist, this kind does not.
+ */
 const UNAVAILABLE = [
   {
     key: "request-correction",
     label: "Request correction",
-    reason: "Atlas cannot make data requests yet.",
-  },
-  {
-    key: "request-deletion",
-    label: "Request deletion",
-    reason: "Atlas cannot make data requests yet.",
+    reason: "Correction requests are not built yet. Deletion requests are.",
   },
 ] as const;
 
@@ -127,6 +128,27 @@ export function AssetDetailHeaderActions({
         archive={archive}
         restore={restore}
       />
+
+      {/*
+        Step 1 of the request flow (ATL-058). Navigation, so a link — the review
+        lives on its own route rather than opening over this page, because
+        frontend §10 requires draft preservation and a modal whose state vanishes
+        on refresh preserves nothing.
+
+        Named for the service, like every other control here: the asset list
+        renders one of these per card, and a control announced as "Request
+        deletion" a dozen times over tells a screen-reader user nothing about
+        which service it acts on.
+      */}
+      <Button asChild variant="secondary">
+        <Link
+          href={`/assets/${assetId}/request`}
+          data-action="request-deletion"
+          aria-label={`Request deletion: ${serviceName}`}
+        >
+          Request deletion
+        </Link>
+      </Button>
 
       {UNAVAILABLE.map((action) => (
         <div key={action.key} className="flex flex-col gap-1">

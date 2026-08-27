@@ -356,19 +356,25 @@ describe("the requests section", () => {
     expect(screen.getAllByRole("heading", { level: 2 })[REQUESTS]).toHaveTextContent("Requests");
   });
 
-  it("says the capability does not exist yet, and claims nothing more", async () => {
+  it("says none has been prepared, and claims nothing more", async () => {
+    /**
+     * The copy changed in ATL-058: requests exist now, so "Atlas cannot make
+     * data requests yet" stopped being true. What is still empty is the *list* —
+     * ATL-064/ATL-065 own that — so the section says none has been prepared and
+     * points at the control that prepares one.
+     */
     render(<AssetDetailSections {...props()} />);
     const requests = within(await expand(REQUESTS, "Requests"));
 
-    expect(requests.getByText(/Atlas cannot make data requests yet/i)).toBeVisible();
+    expect(requests.getByText(/No requests have been prepared/i)).toBeVisible();
 
     /**
-     * The wording a deferred state must never drift into. Each of these would
-     * tell the user something happened, or could happen today, and none of it
-     * can: there is no `data_requests` table for any of it to be true of.
+     * The wording this section must never drift into, and the reason is
+     * unchanged by ATL-058: Atlas drafts and never sends (security §11, frontend
+     * §9). Each of these would tell the user something happened that did not.
      */
     const text = (sections()[REQUESTS] as HTMLElement).textContent ?? "";
-    expect(text).not.toMatch(/\b(sent|submitted|pending|in progress|we have|awaiting)\b/i);
+    expect(text).not.toMatch(/\b(sent by Atlas|submitted|pending|in progress|awaiting)\b/i);
   });
 
   it("renders no request records, because none can exist", () => {

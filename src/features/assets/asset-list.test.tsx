@@ -236,12 +236,15 @@ describe("card actions", () => {
     const archive = within(menu).getByRole("menuitem", { name: ARCHIVE_COPY.archive });
     expect(archive).not.toHaveAttribute("aria-disabled", "true");
 
-    for (const label of ["View details", "Request deletion"]) {
-      expect(within(menu).getByRole("menuitem", { name: label })).toHaveAttribute(
-        "aria-disabled",
-        "true",
-      );
-    }
+    /**
+     * Request deletion left this list in ATL-058, which built Step 1 of the
+     * request flow. View details stays: the detail page has existed since
+     * ATL-034, and what is missing is the card's route to it (#139).
+     */
+    expect(within(menu).getByRole("menuitem", { name: "View details" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   it("keeps View details disabled, because #139 is not this ticket", async () => {
@@ -261,16 +264,20 @@ describe("card actions", () => {
     expect(view).not.toHaveAttribute("href");
   });
 
-  it("leaves the request action deferred and inert", async () => {
-    /** ATL-056 owns requests; `data_requests` has no migration yet. */
+  it("offers Request deletion, pointing at Step 1 of the request flow", async () => {
+    /**
+     * ATL-058. A link like Edit, because the review lives on its own route —
+     * frontend §10 requires draft preservation, and a modal whose state vanishes
+     * on refresh preserves nothing.
+     */
     const user = userEvent.setup();
     card();
 
     const menu = await openMenu(user);
     const request = within(menu).getByRole("menuitem", { name: "Request deletion" });
 
-    expect(request).toHaveAttribute("aria-disabled", "true");
-    expect(request).not.toHaveAttribute("href");
+    expect(request).toHaveAttribute("href", `/assets/${asset().id}/request`);
+    expect(request).not.toHaveAttribute("aria-disabled", "true");
   });
 });
 
