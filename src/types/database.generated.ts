@@ -441,7 +441,107 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "digital_assets_candidate_id_fkey"
+            columns: ["user_id", "candidate_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_candidates"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
+      discovery_candidates: {
+        Row: {
+          adjudicated_at: string | null
+          asset_id: string | null
+          created_at: string
+          evidence_id: string
+          id: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          adjudicated_at?: string | null
+          asset_id?: string | null
+          created_at?: string
+          evidence_id: string
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          adjudicated_at?: string | null
+          asset_id?: string | null
+          created_at?: string
+          evidence_id?: string
+          id?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discovery_candidates_asset_fkey"
+            columns: ["user_id", "asset_id"]
+            isOneToOne: false
+            referencedRelation: "digital_assets"
+            referencedColumns: ["user_id", "id"]
+          },
+          {
+            foreignKeyName: "discovery_candidates_evidence_fkey"
+            columns: ["user_id", "evidence_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_evidence"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
+      discovery_evidence: {
+        Row: {
+          created_at: string
+          evidence_summary: string
+          evidence_type: string
+          id: string
+          invocation_id: string
+          is_aggregator_attributed: boolean
+          provider_class: string
+          provider_evidence_json: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          evidence_summary: string
+          evidence_type: string
+          id?: string
+          invocation_id: string
+          is_aggregator_attributed?: boolean
+          provider_class: string
+          provider_evidence_json?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          evidence_summary?: string
+          evidence_type?: string
+          id?: string
+          invocation_id?: string
+          is_aggregator_attributed?: boolean
+          provider_class?: string
+          provider_evidence_json?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discovery_evidence_invocation_fkey"
+            columns: ["user_id", "invocation_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_provider_invocations"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
       }
       discovery_provider_invocation_fields: {
         Row: {
@@ -531,6 +631,30 @@ export type Database = {
             referencedColumns: ["user_id", "id"]
           },
         ]
+      }
+      discovery_rejections: {
+        Row: {
+          created_at: string
+          fingerprint: string
+          id: string
+          provider_class: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          fingerprint: string
+          id?: string
+          provider_class: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          fingerprint?: string
+          id?: string
+          provider_class?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       discovery_runs: {
         Row: {
