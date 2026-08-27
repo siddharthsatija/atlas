@@ -161,3 +161,67 @@ describe("generated types agree with the migration", () => {
     expect(types).toContain("wrapped_dek: string | null");
   });
 });
+
+/**
+ * ATL-200 · `user_encryption_keys` schema amendments (ATL-203, D-02).
+ *
+ * The ATL-200 migration makes two structural changes that extend the base
+ * migration: it replaces the single-purpose uniqueness index with a
+ * per-(user_id, key_purpose) index, and it adds the `key_purpose` column
+ * that gates which wrapping AAD applies to a row.
+ *
+ * These tests cover the effective/live schema contract. The base-migration
+ * tests above cover only the original migration shape; without these, a
+ * regression that accidentally re-created the old single-purpose index (or
+ * dropped `key_purpose`) would pass the existing test suite undetected.
+ */
+describe("ATL-200 · user_encryption_keys schema amendments", () => {
+  const ATL200_MIGRATION =
+    "supabase/migrations/20260821090000_atl_200_discovery_schema_foundation.sql";
+
+  const atl200Sql = execFileSync("cat", [join(ROOT, ATL200_MIGRATION)], { encoding: "utf8" });
+  /** Statements only — a comment must never satisfy a schema assertion. */
+  const atl200Statements = atl200Sql.replace(/--[^\n]*/g, "");
+
+  it("drops the old one-active-per-user index", () => {
+    // The original index allowed only one active key per user regardless of
+    // purpose. After ATL-200 it must not exist: a content key and a rejection
+    // key for the same user would violate it.
+    expect(atl200Statements).toMatch(
+      /drop\s+index\s+if\s+exists\s+user_encryption_keys_one_active_per_user/i,
+    );
+  });
+
+  it("creates the purpose-scoped uniqueness index", () => {
+    // The replacement index constrains (user_id, key_purpose) where active,
+    // allowing one active content key and one active rejection key per user
+    // without violating uniqueness.
+    expect(atl200Statements).toMatch(
+      /create\s+unique\s+index\s+user_encryption_keys_one_active_per_purpose\s+on\s+public\.user_encryption_keys\s*\(\s*user_id\s*,\s*key_purpose\s*\)/i,
+    );
+  });
+
+  it("scopes the purpose-scoped index to active rows only", () => {
+    // The WHERE clause is what makes the index partial: a destroyed or retired
+    // row does not occupy the active slot.
+    expect(atl200Statements).toMatch(
+      /create\s+unique\s+index\s+user_encryption_keys_one_active_per_purpose[\s\S]{0,120}?where[\s\S]{0,60}?status\s*=\s*'active'/i,
+    );
+  });
+
+  it("adds the key_purpose column with a closed vocabulary CHECK", () => {
+    // The CHECK restricts values to the two defined purposes. Any new purpose
+    // requires an explicit migration and ADR amendment (ADR-008 §8).
+    expect(atl200Statements).toMatch(
+      /add\s+column\s+key_purpose\s+text\s+not\s+null[\s\S]{0,80}?check\s*\([\s\S]{0,80}?'content'[\s\S]{0,40}?'rejection'[\s\S]{0,20}?\)/i,
+    );
+  });
+
+  it("defaults key_purpose to 'content' so existing rows are unaffected", () => {
+    // Pre-ATL-200 rows are all content DEKs. The DEFAULT guarantees they are
+    // classified correctly without a data migration.
+    expect(atl200Statements).toMatch(
+      /add\s+column\s+key_purpose\s+text\s+not\s+null\s+default\s+'content'/i,
+    );
+  });
+});

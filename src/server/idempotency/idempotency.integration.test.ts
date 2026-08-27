@@ -160,7 +160,16 @@ vi.mock("@/server/repositories/idempotency-key-repository", async () => {
   };
 });
 
-/** In-memory DEK store so the real encryption service works without a database. */
+/**
+ * In-memory DEK store so the real encryption service works without a database.
+ *
+ * ATL-203: `EncryptionService.keyState()` now filters rows to
+ * `keyPurpose === 'content'` before deciding whether an active key exists.
+ * Rows that omit `keyPurpose` have it as `undefined`, which does not satisfy
+ * the filter, so the service incorrectly concludes no key exists and throws
+ * `CryptoError("key_unavailable")`. Every fake content-key row must therefore
+ * carry `keyPurpose: "content"` explicitly.
+ */
 const keyRows: {
   id: string;
   userId: string;
@@ -168,6 +177,7 @@ const keyRows: {
   kekVersion: number;
   status: string;
   destroyedAt: string | null;
+  keyPurpose: string;
 }[] = [];
 
 vi.mock("@/server/repositories/encryption-key-repository", () => {
@@ -188,6 +198,10 @@ vi.mock("@/server/repositories/encryption-key-repository", () => {
           kekVersion,
           status: "active",
           destroyedAt: null,
+          // ATL-203: purpose must be explicit so keyState()'s content filter
+          // recognises this row. The database DEFAULT 'content' only applies
+          // via toRecord(); this mock bypasses toRecord() entirely.
+          keyPurpose: "content",
         };
         keyRows.push(row);
         return Promise.resolve(row);

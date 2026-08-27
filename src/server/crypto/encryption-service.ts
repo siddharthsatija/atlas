@@ -92,7 +92,13 @@ export class EncryptionService {
   }
 
   /**
-   * Classifies the user's key state from a single unfiltered read.
+   * Classifies the user's content-key state from a single unfiltered read.
+   *
+   * Filters to `key_purpose = 'content'` before classification so that a
+   * rejection key (ATL-203) row — active or destroyed — cannot interfere with
+   * content-key operations. A destroyed rejection key must not read as the
+   * content key being destroyed, and an active rejection key must not satisfy
+   * the "is there already an active key?" check.
    *
    * `destroyed` is checked independently of `active` rather than as an `else`:
    * the unique partial index only covers `status = 'active'`, so a destroyed row
@@ -104,9 +110,10 @@ export class EncryptionService {
     destroyed: boolean;
   }> {
     const rows = await this.keys.findForUser(userId);
+    const contentRows = rows.filter((r) => r.keyPurpose === "content");
     return {
-      active: rows.find((row) => row.status === "active") ?? null,
-      destroyed: rows.some((row) => row.status === "destroyed"),
+      active: contentRows.find((row) => row.status === "active") ?? null,
+      destroyed: contentRows.some((row) => row.status === "destroyed"),
     };
   }
 
@@ -200,7 +207,12 @@ export class EncryptionService {
     if (fromVersion === target.version) return 0;
 
     const sourceKek = kekForVersion(fromVersion);
-    const batch = await this.keys.listWrappedUnder(fromVersion, batchSize);
+    // Purpose-scoped: content and rejection keys use different wrapping AADs.
+    // Passing a rejection key row to `unwrapDek` would fail authentication
+    // (wrong AAD) and break the rotation sweep. Rejection keys are rotated
+    // by `RejectionKeyService.rotateKek`, which uses `seal`/`open` with the
+    // correct `wrapContext(record.id)` AAD. (ATL-203, ADR-008 §5.)
+    const batch = await this.keys.listWrappedUnderByPurpose("content", fromVersion, batchSize);
 
     let rewrapped = 0;
     for (const record of batch) {

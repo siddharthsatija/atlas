@@ -10,6 +10,12 @@ import type { EncryptionContext } from "./envelope";
  * throughout — nothing here stubs `seal`, `open`, `wrapDek`, or `unwrapDek` —
  * so a broken envelope fails these tests too.
  *
+ * ATL-203: Added `keyPurpose` to `FakeRow`, updated `activeRow` and
+ * `insertActive` to be purpose-aware, added `findForUserByPurpose` and
+ * `insertActiveForPurpose`, and added "purpose isolation" tests verifying that
+ * a rejection key row (active or destroyed) cannot interfere with content-key
+ * operations.
+ *
  * Runs in the node project because the service is `server-only`.
  */
 
@@ -38,6 +44,8 @@ interface FakeRow {
   kekVersion: number;
   status: "active" | "retired" | "destroyed";
   destroyedAt: string | null;
+  /** ATL-203: every row carries an explicit purpose; 'content' is the pre-ATL-200 default. */
+  keyPurpose: string;
 }
 
 /** In-memory stand-in enforcing the same invariants as the table's constraints. */
@@ -59,7 +67,20 @@ class FakeKeyStore {
   }
 
   /**
+   * All rows for a user scoped to one key purpose (ATL-203).
+   *
+   * Purpose-specific services call this so their keyState classification never
+   * crosses purpose boundaries.
+   */
+  findForUserByPurpose(userId: string, purpose: string) {
+    return this.rows.filter((r) => r.userId === userId && r.keyPurpose === purpose);
+  }
+
+  /**
    * Mirrors the unique partial index `where status = 'active'`.
+   *
+   * ATL-203: now scoped to a purpose so that an active rejection key does not
+   * block insertion of a content key and vice versa.
    *
    * Note what this does NOT block: a destroyed row does not occupy the active
    * slot, so the database would happily accept a replacement key for a
@@ -67,12 +88,16 @@ class FakeKeyStore {
    * it is why refusing to re-key a shredded account has to be enforced in the
    * service rather than assumed from the schema.
    */
-  private activeRow(userId: string) {
-    return this.rows.find((r) => r.userId === userId && r.status === "active") ?? null;
+  private activeRow(userId: string, purpose = "content") {
+    return (
+      this.rows.find(
+        (r) => r.userId === userId && r.keyPurpose === purpose && r.status === "active",
+      ) ?? null
+    );
   }
 
   insertActive(userId: string, wrappedDek: string, kekVersion: number) {
-    if (this.raceWinnerWrappedDek !== null && !this.activeRow(userId)) {
+    if (this.raceWinnerWrappedDek !== null && !this.activeRow(userId, "content")) {
       // A concurrent first write commits between our read and our insert. The
       // loser must both fail AND find the winner waiting on re-read; committing
       // the winner here is what makes that branch genuinely reachable.
@@ -83,10 +108,11 @@ class FakeKeyStore {
         kekVersion,
         status: "active",
         destroyedAt: null,
+        keyPurpose: "content",
       });
       return null;
     }
-    if (this.activeRow(userId)) return null;
+    if (this.activeRow(userId, "content")) return null;
     const row: FakeRow = {
       id: `key-${this.nextId++}`,
       userId,
@@ -94,6 +120,34 @@ class FakeKeyStore {
       kekVersion,
       status: "active",
       destroyedAt: null,
+      keyPurpose: "content",
+    };
+    this.rows.push(row);
+    return row;
+  }
+
+  /**
+   * Inserts a new active key with an explicit id and purpose (ATL-203).
+   *
+   * Returns null on a unique-index conflict (active row already exists for
+   * this user+purpose), mirroring the repository behaviour.
+   */
+  insertActiveForPurpose(
+    id: string,
+    userId: string,
+    wrappedKey: string,
+    kekVersion: number,
+    purpose: string,
+  ) {
+    if (this.activeRow(userId, purpose)) return null;
+    const row: FakeRow = {
+      id,
+      userId,
+      wrappedDek: wrappedKey,
+      kekVersion,
+      status: "active",
+      destroyedAt: null,
+      keyPurpose: purpose,
     };
     this.rows.push(row);
     return row;
@@ -102,6 +156,21 @@ class FakeKeyStore {
   listWrappedUnder(kekVersion: number, limit: number) {
     return this.rows
       .filter((r) => r.kekVersion === kekVersion && r.status !== "destroyed")
+      .slice(0, limit);
+  }
+
+  /**
+   * Purpose-scoped rotation sweep (ATL-203).
+   *
+   * Content and rejection keys use different AADs; mixing them in a single
+   * rotation sweep fails authentication. The service now calls this instead of
+   * `listWrappedUnder`.
+   */
+  listWrappedUnderByPurpose(purpose: string, kekVersion: number, limit: number) {
+    return this.rows
+      .filter(
+        (r) => r.keyPurpose === purpose && r.kekVersion === kekVersion && r.status !== "destroyed",
+      )
       .slice(0, limit);
   }
 
@@ -133,14 +202,31 @@ vi.mock("@/server/repositories/encryption-key-repository", () => ({
     findForUser(userId: string) {
       return Promise.resolve(store.findForUser(userId));
     }
+    findForUserByPurpose(userId: string, purpose: string) {
+      return Promise.resolve(store.findForUserByPurpose(userId, purpose));
+    }
     findById(userId: string, id: string) {
       return Promise.resolve(store.rows.find((r) => r.userId === userId && r.id === id) ?? null);
     }
     insertActive(userId: string, wrappedDek: string, kekVersion: number) {
       return Promise.resolve(store.insertActive(userId, wrappedDek, kekVersion));
     }
+    insertActiveForPurpose(
+      id: string,
+      userId: string,
+      wrappedKey: string,
+      kekVersion: number,
+      purpose: string,
+    ) {
+      return Promise.resolve(
+        store.insertActiveForPurpose(id, userId, wrappedKey, kekVersion, purpose),
+      );
+    }
     listWrappedUnder(kekVersion: number, limit: number) {
       return Promise.resolve(store.listWrappedUnder(kekVersion, limit));
+    }
+    listWrappedUnderByPurpose(purpose: string, kekVersion: number, limit: number) {
+      return Promise.resolve(store.listWrappedUnderByPurpose(purpose, kekVersion, limit));
     }
     rewrap(id: string, expected: number, wrappedDek: string, kekVersion: number) {
       return Promise.resolve(store.rewrap(id, expected, wrappedDek, kekVersion));
@@ -470,6 +556,168 @@ describe("crypto-shredding", () => {
 
   it("reports zero for a user who never held a key", async () => {
     expect(await service().destroyUserKeys(BOB)).toBe(0);
+  });
+});
+
+/**
+ * ATL-203 — KEK rotation with mixed key purposes.
+ *
+ * `EncryptionService.rotateKek` must be scoped to `key_purpose = 'content'`.
+ * Rejection keys use a different wrapping AAD (`wrapContext(record.id)` instead
+ * of `wrapDek`'s `wrapped_dek@${version}` + userId), so passing a rejection
+ * row to `unwrapDek` fails authentication. The fix uses `listWrappedUnderByPurpose`
+ * to ensure the batch contains only content keys.
+ *
+ * Rejection key rotation is delegated to `RejectionKeyService.rotateKek`.
+ */
+describe("KEK rotation — purpose isolation (ATL-203)", () => {
+  function rotateEnvironmentTo(version: number, key: string) {
+    kekEnv.ATLAS_KEK_PREVIOUS = kekEnv.ATLAS_KEK;
+    kekEnv.ATLAS_KEK_PREVIOUS_VERSION = kekEnv.ATLAS_KEK_VERSION;
+    kekEnv.ATLAS_KEK = key;
+    kekEnv.ATLAS_KEK_VERSION = version;
+  }
+
+  const KEK_V2_ROT = Buffer.alloc(KEY_BYTES, 44).toString("base64");
+
+  it("rotates content keys but leaves rejection key rows untouched", async () => {
+    const svc = service();
+    // Encrypt creates alice's content key (kekVersion 1).
+    const envelope = await svc.encrypt(ALICE, "secret", CONTEXT);
+
+    // Pre-seed a rejection key row for alice on the same KEK generation.
+    // Its wrappedDek is a sentinel — if rotateKek tried to unwrapDek() it,
+    // the wrong AAD would throw integrity_failure and the test would fail.
+    const SENTINEL = "sentinel-rejection-envelope";
+    store.rows.push({
+      id: "rej-rot-1",
+      userId: ALICE,
+      wrappedDek: SENTINEL,
+      kekVersion: 1,
+      status: "active",
+      destroyedAt: null,
+      keyPurpose: "rejection",
+    });
+
+    rotateEnvironmentTo(2, KEK_V2_ROT);
+    // Should rotate exactly 1 key (the content key) without touching the rejection row.
+    const rotated = await svc.rotateKek(1);
+    expect(rotated).toBe(1);
+
+    // Content key is on the new generation.
+    const contentRow = store.rows.find((r) => r.keyPurpose === "content")!;
+    expect(contentRow.kekVersion).toBe(2);
+
+    // Rejection row is unchanged — rotateKek did not touch it.
+    const rejRow = store.rows.find((r) => r.keyPurpose === "rejection")!;
+    expect(rejRow.kekVersion).toBe(1);
+    expect(rejRow.wrappedDek).toBe(SENTINEL);
+
+    // Content key is still usable after rotation.
+    expect(await svc.decrypt(ALICE, envelope, CONTEXT)).toBe("secret");
+  });
+
+  it("a user with both purposes under the old KEK: rotation only advances content key", async () => {
+    const svc = service();
+    await svc.encrypt(ALICE, "value", CONTEXT);
+    await svc.encrypt(BOB, "value", CONTEXT);
+
+    // Both users have rejection keys on the old generation too.
+    for (const uid of [ALICE, BOB]) {
+      store.rows.push({
+        id: `rej-${uid}`,
+        userId: uid,
+        wrappedDek: "rej-sentinel",
+        kekVersion: 1,
+        status: "active",
+        destroyedAt: null,
+        keyPurpose: "rejection",
+      });
+    }
+
+    rotateEnvironmentTo(2, KEK_V2_ROT);
+    const rotated = await svc.rotateKek(1);
+    // 2 content keys rotated; 0 rejection keys touched by this service.
+    expect(rotated).toBe(2);
+
+    const contentRows = store.rows.filter((r) => r.keyPurpose === "content");
+    const rejRows = store.rows.filter((r) => r.keyPurpose === "rejection");
+    expect(contentRows.every((r) => r.kekVersion === 2)).toBe(true);
+    expect(rejRows.every((r) => r.kekVersion === 1)).toBe(true);
+  });
+
+  it("rotation is idempotent even when rejection rows are present", async () => {
+    const svc = service();
+    await svc.encrypt(ALICE, "secret", CONTEXT);
+    store.rows.push({
+      id: "rej-idem",
+      userId: ALICE,
+      wrappedDek: "rej-sentinel",
+      kekVersion: 1,
+      status: "active",
+      destroyedAt: null,
+      keyPurpose: "rejection",
+    });
+
+    rotateEnvironmentTo(2, KEK_V2_ROT);
+    expect(await svc.rotateKek(1)).toBe(1);
+    expect(await svc.rotateKek(1)).toBe(0); // nothing left on v1 for content
+  });
+});
+
+/**
+ * ATL-203 — purpose isolation.
+ *
+ * `EncryptionService.keyState` filters to `key_purpose = 'content'` so that
+ * rejection-key rows (active or destroyed) cannot interfere with content-key
+ * operations. These tests nail that behaviour down with both active and
+ * destroyed rejection-key rows in the store.
+ */
+describe("purpose isolation (ATL-203)", () => {
+  it("ignores an active rejection key when looking up the content DEK", async () => {
+    // An active rejection key row is already in the store for Alice.
+    // The EncryptionService must not treat it as her content key.
+    store.rows.push({
+      id: "rej-1",
+      userId: ALICE,
+      wrappedDek: "not-a-real-content-envelope",
+      kekVersion: 1,
+      status: "active",
+      destroyedAt: null,
+      keyPurpose: "rejection",
+    });
+
+    const svc = service();
+    // Encrypt creates a content key; decrypt uses it. Neither should touch the
+    // rejection row or mistake it for the content key.
+    const envelope = await svc.encrypt(ALICE, "secret", CONTEXT);
+    expect(await svc.decrypt(ALICE, envelope, CONTEXT)).toBe("secret");
+
+    // Exactly one content key was created; the rejection row is untouched.
+    const contentRows = store.rows.filter((r) => r.keyPurpose === "content");
+    expect(contentRows).toHaveLength(1);
+    expect(contentRows[0]?.status).toBe("active");
+  });
+
+  it("does not treat a destroyed rejection key as the content key being destroyed", async () => {
+    // A destroyed rejection key exists (e.g. from a partial account deletion).
+    // `keyState` must not conflate it with a destroyed content key — otherwise
+    // the next encrypt would throw `key_destroyed` for a user whose content
+    // key is perfectly intact.
+    store.rows.push({
+      id: "rej-destroyed",
+      userId: ALICE,
+      wrappedDek: null,
+      kekVersion: 1,
+      status: "destroyed",
+      destroyedAt: new Date().toISOString(),
+      keyPurpose: "rejection",
+    });
+
+    const svc = service();
+    // Should create a content key and round-trip successfully.
+    const envelope = await svc.encrypt(ALICE, "secret", CONTEXT);
+    expect(await svc.decrypt(ALICE, envelope, CONTEXT)).toBe("secret");
   });
 });
 
