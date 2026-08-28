@@ -229,6 +229,34 @@ export const AUDIT_CONTEXT_POLICY: FieldPolicy = {
   providerClass: scalar(matches(/^[a-z][a-z0-9_]{0,63}$/)),
   fieldId: scalar(matches(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)),
   disclosureContractVersion: scalar(matches(/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/)),
+
+  /**
+   * ATL-206 dispatch-engine context keys for `discovery.provider.invoked`.
+   *
+   * `discoveryRunId` and `invocationId` are the FK identifiers from
+   * `discovery_runs` and `discovery_provider_invocations` — UUIDs in the
+   * standard 8-4-4-4-12 form, identical alphabet to the existing `fieldId`
+   * allowance.
+   *
+   * `disclosureClass` is the closed vocabulary from `provider-adapter.ts`
+   * (ADR-008 §2): which of the three disclosure mechanisms was used. The
+   * pattern matches the three values exactly.
+   *
+   * `invocationStatus` is the two-value *audit* vocabulary, distinct from the
+   * four-value DB column vocabulary (success / blocked / error / rate_limited):
+   *
+   *   - `dispatched`: disclosure crossed the outbound boundary (provider was
+   *     called, regardless of whether it succeeded, errored, or rate-limited).
+   *   - `blocked`: no disclosure crossed the boundary (authorization failure
+   *     OR infrastructure error that prevented evaluation).
+   *
+   * Infrastructure errors before any provider call produce DB `error` but
+   * audit `blocked` — the audit vocabulary describes disclosure, not outcome.
+   */
+  discoveryRunId: scalar(matches(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)),
+  invocationId: scalar(matches(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)),
+  disclosureClass: scalar(matches(/^(hashed_query|identifying_lookup|broker_query)$/)),
+  invocationStatus: scalar(matches(/^(dispatched|blocked)$/)),
 };
 
 function matches(pattern: RegExp): (value: unknown) => boolean {
