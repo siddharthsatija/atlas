@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.generated";
-import type { ConsentType } from "@/lib/consent";
+import type { ConsentType, DiscoveryConsentType } from "@/lib/consent";
 
 /**
  * Data access for `consents` (ATL-078, architecture §7.10).
@@ -19,7 +19,7 @@ export type ConsentRow = Database["public"]["Tables"]["consents"]["Row"];
 export interface ConsentRecord {
   id: string;
   userId: string;
-  consentType: ConsentType;
+  consentType: ConsentType | DiscoveryConsentType;
   policyVersion: string;
   granted: boolean;
   recordedAt: string;
@@ -29,7 +29,7 @@ function toRecord(row: ConsentRow): ConsentRecord {
   return {
     id: row.id,
     userId: row.user_id,
-    consentType: row.consent_type as ConsentType,
+    consentType: row.consent_type as ConsentType | DiscoveryConsentType,
     policyVersion: row.policy_version,
     granted: row.granted,
     recordedAt: row.recorded_at,
@@ -59,7 +59,7 @@ export class ConsentRepository {
   /** Records one decision. Grants and revocations are both inserts. */
   async append(
     userId: string,
-    consentType: ConsentType,
+    consentType: ConsentType | DiscoveryConsentType,
     policyVersion: string,
     granted: boolean,
   ): Promise<ConsentRecord> {
@@ -86,7 +86,10 @@ export class ConsentRepository {
    * resolution, and an unstable tiebreak would make the gate's answer depend on
    * which row the planner happened to return first.
    */
-  async latestFor(userId: string, consentType: ConsentType): Promise<ConsentRecord | null> {
+  async latestFor(
+    userId: string,
+    consentType: ConsentType | DiscoveryConsentType,
+  ): Promise<ConsentRecord | null> {
     const { data, error } = await this.db
       .from("consents")
       .select("*")

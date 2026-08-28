@@ -106,6 +106,45 @@ export const AUDIT_EVENT_TYPES = [
 
   // Operator elevation
   "operator.elevated",
+
+  /**
+   * Discovery consent granted or revoked (ATL-205, ADR-007 §5).
+   *
+   * Emitted by `DiscoveryConsentService.grantConsent` and `revokeConsent`
+   * respectively. Distinct from `consent.granted`/`consent.revoked` because
+   * discovery consent carries different audit context (providerClass) and is
+   * managed through a different service boundary.
+   *
+   * Context: `{ consentType, providerClass, policyVersion }`.
+   */
+  "discovery.consent.granted",
+  "discovery.consent.revoked",
+
+  /**
+   * User acknowledged first-disclosure terms for a provider class (ATL-205,
+   * ADR-008 §3).
+   *
+   * Emitted by `DiscoveryConsentService.recordFirstDisclosureAcknowledgment`
+   * after the row is persisted. Context: `{ providerClass, fieldId,
+   * disclosureContractVersion }`.
+   */
+  "discovery.disclosure.acknowledged",
+
+  /**
+   * Discovery provider was invoked for a user field (ATL-206).
+   *
+   * Not emitted by ATL-205 — included in the inventory now so the type is
+   * registered before ATL-206 writes it.
+   */
+  "discovery.provider.invoked",
+
+  /**
+   * A discovery candidate was adjudicated or de-confirmed (ATL-208).
+   *
+   * Both types included in the inventory now; ATL-208 emits them.
+   */
+  "discovery.candidate.adjudicated",
+  "discovery.candidate.deconfirmed",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -175,6 +214,21 @@ export const AUDIT_CONTEXT_POLICY: FieldPolicy = {
    * `matches`, because a boolean is not an integer and is not a string.
    */
   enabled: scalar((value) => typeof value === "boolean"),
+
+  /**
+   * Discovery context keys (ATL-205, ADR-008 §8).
+   *
+   * `providerClass` identifies the discovery provider; same alphabet as the DB
+   * check constraint. `fieldId` is a UUID — same as the `personal_fields.id`
+   * foreign key. `disclosureContractVersion` is a short opaque version string
+   * with the same alphabet as `policyVersion` (already allowed above).
+   *
+   * None of these carry personal field values or labels; ADR-008 §8 forbids
+   * those from appearing in any audit context.
+   */
+  providerClass: scalar(matches(/^[a-z][a-z0-9_]{0,63}$/)),
+  fieldId: scalar(matches(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)),
+  disclosureContractVersion: scalar(matches(/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/)),
 };
 
 function matches(pattern: RegExp): (value: unknown) => boolean {

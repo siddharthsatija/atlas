@@ -543,6 +543,41 @@ export type Database = {
           },
         ]
       }
+      discovery_first_disclosure_acknowledgments: {
+        Row: {
+          acknowledged_at: string
+          disclosure_contract_version: string
+          field_id: string
+          id: string
+          provider_class: string
+          user_id: string
+        }
+        Insert: {
+          acknowledged_at?: string
+          disclosure_contract_version: string
+          field_id: string
+          id?: string
+          provider_class: string
+          user_id: string
+        }
+        Update: {
+          acknowledged_at?: string
+          disclosure_contract_version?: string
+          field_id?: string
+          id?: string
+          provider_class?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discovery_first_disclosure_acknowledgments_field_fkey"
+            columns: ["user_id", "field_id"]
+            isOneToOne: false
+            referencedRelation: "user_personal_fields"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
       discovery_provider_invocation_fields: {
         Row: {
           created_at: string
