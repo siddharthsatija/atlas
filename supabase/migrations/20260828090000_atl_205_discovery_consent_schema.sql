@@ -60,9 +60,9 @@ create table public.discovery_first_disclosure_acknowledgments (
   constraint discovery_first_disclosure_acknowledgments_tuple_key unique (user_id, field_id, provider_class, disclosure_contract_version)
 );
 
-comment on table public.discovery_first_disclosure_acknowledgments is 'Durable acknowledgment that a user reviewed the pre-disclosure notice for a ' 'specific (provider_class, field_id, disclosure_contract_version) tuple before ' 'the identifying value was first transmitted (ATL-205, ADR-008 §3). ' 'Idempotent: a second acknowledgment for the same tuple is silently ignored. ' 'The actual field value is never stored — only the internal field_id reference.';
+comment on table public.discovery_first_disclosure_acknowledgments is 'Durable acknowledgment that a user reviewed the pre-disclosure notice for a specific (provider_class, field_id, disclosure_contract_version) tuple before the identifying value was first transmitted (ATL-205, ADR-008 §3). Idempotent: a second acknowledgment for the same tuple is silently ignored. The actual field value is never stored — only the internal field_id reference.';
 
-comment on column public.discovery_first_disclosure_acknowledgments.disclosure_contract_version is 'Version of the disclosure contract in effect when the user acknowledged. ' 'A material policy change issues a new version; the prior acknowledgment is ' 'then no longer sufficient and a new notice must be presented (ADR-008 §3).';
+comment on column public.discovery_first_disclosure_acknowledgments.disclosure_contract_version is 'Version of the disclosure contract in effect when the user acknowledged. A material policy change issues a new version; the prior acknowledgment is then no longer sufficient and a new notice must be presented (ADR-008 §3).';
 
 -- ---------------------------------------------------------------------------
 -- Indexes
