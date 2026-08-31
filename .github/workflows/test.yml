@@ -37,9 +37,9 @@ jobs:
           # though they test no HIBP behaviour. Copied verbatim from the
           # integration and e2e jobs so the four sets cannot drift apart.
           NEXT_PUBLIC_APP_URL: http://localhost:3000
-          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
+          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE= # gitleaks:allow
           ATLAS_KEK_VERSION: "1"
-          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
+          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE= # gitleaks:allow
           ANTHROPIC_API_KEY: ci-placeholder
           RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
           RATE_LIMIT_REDIS_TOKEN: ci-placeholder

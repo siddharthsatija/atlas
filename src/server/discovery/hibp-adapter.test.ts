@@ -317,6 +317,78 @@ describe("HibpAdapter", () => {
         expect(data.breaches[0]?.Name).toBe("Adobe");
       }
     });
+
+    it("skips a breach when the catalogue fetch itself throws a network error", async () => {
+      const { suffix } = hashParts("alice@example.com");
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          makeResponse(200, [{ hashSuffix: suffix, websites: ["Unreachable", "Adobe"] }]),
+        )
+        .mockRejectedValueOnce(new Error("network down")) // fetch throws for Unreachable
+        .mockResolvedValueOnce(makeResponse(200, CATALOGUE_ENTRY));
+      const result = await adapter.query([EMAIL_FIELD]);
+      expect(result.status).toBe("success");
+      if (result.status === "success") {
+        const data = result.data as { breaches: HibpBreachMatch[] };
+        expect(data.breaches).toHaveLength(1);
+        expect(data.breaches[0]?.Name).toBe("Adobe");
+      }
+    });
+
+    it("skips a breach when the catalogue response json() throws for an ok response", async () => {
+      const { suffix } = hashParts("alice@example.com");
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          makeResponse(200, [{ hashSuffix: suffix, websites: ["Garbled", "Adobe"] }]),
+        )
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: () => Promise.reject(new SyntaxError("bad json")),
+        } as unknown as Response)
+        .mockResolvedValueOnce(makeResponse(200, CATALOGUE_ENTRY));
+      const result = await adapter.query([EMAIL_FIELD]);
+      expect(result.status).toBe("success");
+      if (result.status === "success") {
+        const data = result.data as { breaches: HibpBreachMatch[] };
+        expect(data.breaches).toHaveLength(1);
+        expect(data.breaches[0]?.Name).toBe("Adobe");
+      }
+    });
+
+    it("skips a breach when catalogue returns a null json body for an ok response", async () => {
+      const { suffix } = hashParts("alice@example.com");
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          makeResponse(200, [{ hashSuffix: suffix, websites: ["NullBody", "Adobe"] }]),
+        )
+        .mockResolvedValueOnce(makeResponse(200, null))
+        .mockResolvedValueOnce(makeResponse(200, CATALOGUE_ENTRY));
+      const result = await adapter.query([EMAIL_FIELD]);
+      expect(result.status).toBe("success");
+      if (result.status === "success") {
+        const data = result.data as { breaches: HibpBreachMatch[] };
+        expect(data.breaches).toHaveLength(1);
+        expect(data.breaches[0]?.Name).toBe("Adobe");
+      }
+    });
+
+    it("skips a breach when catalogue returns a non-object primitive body", async () => {
+      const { suffix } = hashParts("alice@example.com");
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          makeResponse(200, [{ hashSuffix: suffix, websites: ["Primitive", "Adobe"] }]),
+        )
+        .mockResolvedValueOnce(makeResponse(200, 42)) // number body, not an object
+        .mockResolvedValueOnce(makeResponse(200, CATALOGUE_ENTRY));
+      const result = await adapter.query([EMAIL_FIELD]);
+      expect(result.status).toBe("success");
+      if (result.status === "success") {
+        const data = result.data as { breaches: HibpBreachMatch[] };
+        expect(data.breaches).toHaveLength(1);
+        expect(data.breaches[0]?.Name).toBe("Adobe");
+      }
+    });
   });
 
   // ── Range error paths ──────────────────────────────────────────────────────

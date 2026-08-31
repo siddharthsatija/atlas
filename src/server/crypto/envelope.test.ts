@@ -284,3 +284,41 @@ describe("zeroize", () => {
     expect(keysEqual(dek, Buffer.alloc(KEY_BYTES))).toBe(true);
   });
 });
+
+// ── Additional validation branches (coverage repair) ─────────────────────────
+
+describe("DEK wrapping — invalid kekVersion values", () => {
+  /**
+   * wrapContext (private) checks `!Number.isInteger(kekVersion) || kekVersion <= 0`.
+   * The existing test covers kekVersion=0 (the boundary integer). These cover the
+   * non-integer branch (float, NaN, Infinity) and the negative branch (-1), which
+   * are structurally distinct arms of the condition and were not previously reached.
+   *
+   * The `invalid_aad` code is correct: a non-positive or non-integer version
+   * means the AAD that would be produced is unsound, so the operation fails closed
+   * before any cryptographic work starts.
+   */
+  const KEK = Buffer.alloc(KEY_BYTES, 3);
+  const USER = "11111111-1111-4111-8111-111111111111";
+
+  it.each([
+    ["negative (-1)", -1],
+    ["float (1.5)", 1.5],
+    ["NaN", Number.NaN],
+    ["Infinity", Infinity],
+    ["-Infinity", -Infinity],
+  ])("rejects kekVersion %s in wrapDek", (_label, version) => {
+    expect(failureCodeOf(() => wrapDek(KEK, generateDek(), USER, version))).toBe("invalid_aad");
+  });
+
+  it.each([
+    ["negative (-1)", -1],
+    ["float (0.5)", 0.5],
+    ["NaN", Number.NaN],
+  ])("rejects kekVersion %s in unwrapDek", (_label, version) => {
+    // unwrapDek calls wrapContext with the caller-supplied version before any
+    // decryption attempt, so an invalid version fails before reaching the store.
+    const wrapped = wrapDek(KEK, generateDek(), USER, 1);
+    expect(failureCodeOf(() => unwrapDek(KEK, wrapped, USER, version))).toBe("invalid_aad");
+  });
+});

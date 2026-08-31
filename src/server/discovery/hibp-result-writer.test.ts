@@ -108,6 +108,53 @@ describe("HibpResultWriter.write", () => {
         HibpResultWriterError,
       );
     });
+
+    it("throws HibpResultWriterError when providerData is a non-object primitive", async () => {
+      const writer = new HibpResultWriter(deps as never);
+      await expect(writer.write("user-1", "inv-1", "not-an-object")).rejects.toBeInstanceOf(
+        HibpResultWriterError,
+      );
+    });
+
+    it("throws HibpResultWriterError when a breach item is null", async () => {
+      const writer = new HibpResultWriter(deps as never);
+      const bad = { fieldId: "f", breaches: [null] };
+      await expect(writer.write("user-1", "inv-1", bad)).rejects.toBeInstanceOf(
+        HibpResultWriterError,
+      );
+    });
+
+    it("throws HibpResultWriterError when a breach item has a non-string Name", async () => {
+      const writer = new HibpResultWriter(deps as never);
+      const bad = { fieldId: "f", breaches: [{ ...BREACH, Name: 123 }] };
+      await expect(writer.write("user-1", "inv-1", bad)).rejects.toBeInstanceOf(
+        HibpResultWriterError,
+      );
+    });
+
+    it("throws HibpResultWriterError when a breach item has a non-array DataClasses", async () => {
+      const writer = new HibpResultWriter(deps as never);
+      const bad = { fieldId: "f", breaches: [{ ...BREACH, DataClasses: "email" }] };
+      await expect(writer.write("user-1", "inv-1", bad)).rejects.toBeInstanceOf(
+        HibpResultWriterError,
+      );
+    });
+
+    it("throws HibpResultWriterError when a breach item has a non-number PwnCount", async () => {
+      const writer = new HibpResultWriter(deps as never);
+      const bad = { fieldId: "f", breaches: [{ ...BREACH, PwnCount: "lots" }] };
+      await expect(writer.write("user-1", "inv-1", bad)).rejects.toBeInstanceOf(
+        HibpResultWriterError,
+      );
+    });
+
+    it("throws HibpResultWriterError when a breach item has a non-boolean isSpamList", async () => {
+      const writer = new HibpResultWriter(deps as never);
+      const bad = { fieldId: "f", breaches: [{ ...BREACH, isSpamList: 1 }] };
+      await expect(writer.write("user-1", "inv-1", bad)).rejects.toBeInstanceOf(
+        HibpResultWriterError,
+      );
+    });
   });
 
   describe("non-spam-list breach, no existing rejection", () => {
@@ -260,6 +307,22 @@ describe("HibpResultWriter.write", () => {
       await writer.write("user-1", "inv-1", { fieldId: "f", breaches: [BREACH, second] });
       expect(deps.evidence.insert).toHaveBeenCalledTimes(2);
       // Only the second breach's evidence succeeded, so only one candidate.
+      expect(deps.candidates.insert).toHaveBeenCalledOnce();
+    });
+
+    it("skips a breach when the rejection check throws, continues to the next", async () => {
+      let callCount = 0;
+      deps = makeDeps({
+        rejectionExists: () => {
+          callCount++;
+          if (callCount === 1) return Promise.reject(new Error("rejection db error"));
+          return Promise.resolve(false);
+        },
+      });
+      const writer = new HibpResultWriter(deps as never);
+      const second = { ...BREACH, Name: "B2", Title: "B2" };
+      await writer.write("user-1", "inv-1", { fieldId: "f", breaches: [BREACH, second] });
+      // First breach fails at rejection check and is skipped; second succeeds.
       expect(deps.candidates.insert).toHaveBeenCalledOnce();
     });
 
