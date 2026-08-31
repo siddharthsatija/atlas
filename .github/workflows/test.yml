@@ -31,6 +31,20 @@ jobs:
       # in the integration job below where one is actually started.
       - name: Unit and server tests with coverage thresholds
         run: pnpm test:coverage
+        env:
+          # Three server-project suites import env.ts at module load (monitoring,
+          # CSP-report, rate-limit). They need the full env to initialise even
+          # though they test no HIBP behaviour. Copied verbatim from the
+          # integration and e2e jobs so the four sets cannot drift apart.
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
+          ATLAS_KEK_VERSION: "1"
+          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
+          ANTHROPIC_API_KEY: ci-placeholder
+          RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
+          RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          HIBP_API_KEY: ci-hibp-placeholder
+          ATLAS_ENV: preview
 
   integration:
     name: Integration tests (RLS, services, jobs)
@@ -100,6 +114,7 @@ jobs:
           ANTHROPIC_API_KEY: ci-placeholder
           RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
           RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          HIBP_API_KEY: ci-hibp-placeholder
           ATLAS_ENV: preview
 
       - name: Stop Supabase
@@ -149,6 +164,7 @@ jobs:
           ANTHROPIC_API_KEY: ci-placeholder
           RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
           RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          HIBP_API_KEY: ci-hibp-placeholder
           ATLAS_ENV: preview
 
       - name: Stop Supabase

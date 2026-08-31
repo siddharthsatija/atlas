@@ -14,7 +14,7 @@ vi.mock("@/config/env", () => ({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const TEST_API_KEY = "test-api-key-1234";
+const TEST_API_KEY = "ci-hibp-placeholder";
 
 const EMAIL_FIELD: DiscoveryEligibleField = {
   id: "field-uuid-1",

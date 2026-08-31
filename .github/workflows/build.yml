@@ -39,6 +39,7 @@ jobs:
           ANTHROPIC_API_KEY: ci-placeholder
           RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
           RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          HIBP_API_KEY: ci-hibp-placeholder
           ATLAS_ENV: preview
       - name: Report bundle size
         run: |

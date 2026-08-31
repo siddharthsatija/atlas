@@ -65,6 +65,20 @@ jobs:
 
       - name: Unit tests with coverage
         run: pnpm test:coverage
+        env:
+          # Three server-project suites import env.ts at module load (monitoring,
+          # CSP-report, rate-limit). They need the full env to initialise even
+          # though they test no HIBP behaviour. Copied verbatim from the
+          # integration and e2e jobs in test.yml so the sets cannot drift apart.
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          ATLAS_KEK: Y2ktcGxhY2Vob2xkZXIta2VrLTMyLWJ5dGVzLW9rISE=
+          ATLAS_KEK_VERSION: "1"
+          AUDIT_HMAC_KEY: Y2ktcGxhY2Vob2xkZXItaG1hYy0zMi1ieXRlcy1vayE=
+          ANTHROPIC_API_KEY: ci-placeholder
+          RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
+          RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          HIBP_API_KEY: ci-hibp-placeholder
+          ATLAS_ENV: preview
 
       - name: Verify PR template is in sync
         run: pnpm verify:pr-template
@@ -84,6 +98,7 @@ jobs:
           ANTHROPIC_API_KEY: ci-placeholder
           RATE_LIMIT_REDIS_URL: http://127.0.0.1:6379
           RATE_LIMIT_REDIS_TOKEN: ci-placeholder
+          HIBP_API_KEY: ci-hibp-placeholder
           ATLAS_ENV: preview
 
       - name: Assert no server secrets in the client bundle
