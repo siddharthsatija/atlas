@@ -274,7 +274,7 @@ downstream findings, and provenance.
 **General rule.** A provider response field is stored only if Atlas's product behavior or
 historical explainability requires it after ingestion. Provider response fields may be inspected
 transiently by the adapter to make ingestion or classification decisions (for example: using
-`is_fabricated`, `is_spam_list`, or `IsAggregator` flags to decide whether to create a candidate)
+`is_fabricated` or `IsSpamList` flags to decide whether to create a candidate)
 without being persisted. Encryption is not justification for retaining unnecessary data.
 
 **HIBP evidence fields — two-source model.** HIBP evidence is assembled from two calls (§1).
@@ -296,8 +296,8 @@ The table below identifies which call produces each field and what Atlas does wi
 | `DataClasses` | **Store** as `data_classes` (array) | Required for candidate card and finding type |
 | `IsVerified` | **Store** as `is_verified` | Affects evidence quality displayed to user |
 | `PwnCount` | **Store** as `pwn_count` | Population context; store only if Atlas surfaces or uses it |
-| `IsAggregator` | **Inspect transiently; discard** | Drives adapter logic (ADR-007 §12 aggregator gate); not needed after ingestion |
-| `IsFabricated`, `IsRetired`, `IsSpamList`, `IsSensitive` | **Inspect transiently; discard** | May drive adapter filtering; not required for explainability |
+| `IsSpamList` | **Inspect transiently; discard** | Drives non-service-corpus gate (ADR-007 §12); not stored in evidence JSON |
+| `IsFabricated`, `IsRetired`, `IsSensitive` | **Inspect transiently; discard** | Not required for explainability |
 | `Description` | **Discard** | Verbose text; reconstructable from public breach name if needed for display; not stored |
 
 **Deduplication key.** Evidence deduplication uses `(provider_class, field_id, breach_name)`.

@@ -106,6 +106,16 @@ export const serverEnvSchema = z.object({
       "ATLAS_RELEASE must be an identifier-shaped build reference (no spaces or free text)",
     )
     .optional(),
+
+  // --- HIBP discovery provider (ATL-207) ------------------------------------
+  /**
+   * HIBP Pro API key for the breached-account range endpoint.
+   *
+   * Required at boot.  Transmitted as the `hibp-api-key` request header on
+   * Step 1 (range) requests only — never logged, never included in client
+   * bundles, and never sent on Step 2 (catalogue) requests which are public.
+   */
+  HIBP_API_KEY: z.string().min(1, "HIBP_API_KEY is required"),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

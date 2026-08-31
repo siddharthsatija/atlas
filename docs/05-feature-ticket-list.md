@@ -1754,14 +1754,14 @@ Changes:
 
 - `HibpAdapter.query(userId, emailField)`: computes `SHA-1(email.trim().toLowerCase()).slice(0, 6)` (6 hex characters; ADR-008 §1 and ADR-007 Consequences — note: the HIBP Pwned Passwords API uses 5 characters; this is the breached-account range endpoint, which uses 6), calls the HIBP range endpoint, and parses the breach list from the response.
 - For each breach in the response:
-  - If `IsAggregator = true`: create a `discovery_evidence` row with `is_aggregator_attributed = true`; do **not** create a `discovery_candidates` row (ADR-007 §12).
-  - If `IsAggregator = false`: create a `discovery_evidence` row with `is_aggregator_attributed = false`; check the rejection fingerprint before creating a candidate (see next point).
+  - If `IsSpamList = true`: create a `discovery_evidence` row with `is_aggregator_attributed = false`; do **not** create a `discovery_candidates` row and do **not** check the rejection fingerprint (ADR-007 §12, non-service-corpus gate).
+  - If `IsSpamList = false`: create a `discovery_evidence` row with `is_aggregator_attributed = false`; check the rejection fingerprint before creating a candidate (see next point).
 - Rejection fingerprint check (before any non-aggregator candidate creation): compute `HMAC-SHA256(rejectionKey, 'discovery_hashed_query' + "\x00" + breachName.trim().toLowerCase())`; encode as `{"v":1,"alg":"hmac-sha256","value":"<base64url>"}` (ADR-008 §8); query `discovery_rejections` for `(user_id, fingerprint)`. If found, skip candidate creation. The rejection key comes from `RejectionKeyService` (ATL-203).
 - The plaintext email address must not appear in `evidence_summary`, `source_reference`, any log field, or any column other than the encrypted `provider_evidence_json` (if populated; AAD = `discovery_evidence.provider_evidence_json:<record_uuid>`, ADR-008 §7) and the in-memory computation.
 - Rate-limit response from HIBP: set `invocation_status = 'rate_limited'`. Network or parse error: set `invocation_status = 'error'`. Both paths skip candidate and evidence creation for the failed request.
 - Emits `discovery.provider.invoked` audit event (via the dispatch engine, ATL-206).
 
-**Testing:** SHA-1 prefix is exactly 6 hex characters; aggregator breach creates evidence only; non-aggregator breach creates evidence + candidate; rejection fingerprint match suppresses candidate; plaintext email absent from all non-encrypted outputs; rate-limit and network-error paths set the correct terminal status.
+**Testing:** SHA-1 prefix is exactly 6 hex characters; spam-list breach (IsSpamList=true) creates evidence only; service-corpus breach (IsSpamList=false) creates evidence + candidate; rejection fingerprint match suppresses candidate; plaintext email absent from all non-encrypted outputs; rate-limit and network-error paths set the correct terminal status.
 
 ---
 

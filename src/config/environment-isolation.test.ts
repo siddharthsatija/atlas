@@ -32,6 +32,7 @@ function env(overrides: Partial<ServerEnv> = {}): ServerEnv {
     AI_ENABLED: true,
     RATE_LIMIT_REDIS_URL: "http://127.0.0.1:6379",
     RATE_LIMIT_REDIS_TOKEN: "redis-token-value",
+    HIBP_API_KEY: "hibp-key-value",
     ...overrides,
   };
 }

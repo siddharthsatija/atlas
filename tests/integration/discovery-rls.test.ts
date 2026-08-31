@@ -130,6 +130,8 @@ async function seedEvidenceChain(
         user_id: userId,
         invocation_id: invocation.id,
         provider_class: "hibp",
+        field_id: "00000000-0000-0000-0000-000000000001",
+        source_identifier: "fixture",
         evidence_type: "breach",
         evidence_summary: "ATL-202 fixture breach",
       })
@@ -258,6 +260,8 @@ describe("discovery_evidence — clients may not write", () => {
           user_id: alice.id,
           invocation_id: "00000000-0000-0000-0000-000000000000",
           provider_class: "hibp",
+          field_id: "00000000-0000-0000-0000-000000000001",
+          source_identifier: "fixture",
           evidence_type: "breach",
           evidence_summary: "client insert attempt",
         })

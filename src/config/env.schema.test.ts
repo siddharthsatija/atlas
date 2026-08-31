@@ -21,6 +21,7 @@ const validEnv = {
   ANTHROPIC_API_KEY: "anthropic-placeholder",
   RATE_LIMIT_REDIS_URL: "http://127.0.0.1:6379",
   RATE_LIMIT_REDIS_TOKEN: "redis-placeholder",
+  HIBP_API_KEY: "hibp-placeholder",
 } as const;
 
 describe("environment validation", () => {
@@ -42,9 +43,16 @@ describe("environment validation", () => {
     "AUDIT_HMAC_KEY",
     "ANTHROPIC_API_KEY",
     "RATE_LIMIT_REDIS_URL",
+    "HIBP_API_KEY",
   ])("fails when required variable %s is missing", (key) => {
     const { [key]: _removed, ...incomplete } = validEnv as Record<string, string>;
     expect(() => buildServerEnv(incomplete)).toThrow(/Invalid environment configuration/);
+  });
+
+  it("fails when HIBP_API_KEY is empty", () => {
+    expect(() => buildServerEnv({ ...validEnv, HIBP_API_KEY: "" })).toThrow(
+      /Invalid environment configuration/,
+    );
   });
 
   it("fails when a URL variable is malformed", () => {
@@ -91,6 +99,7 @@ describe("environment validation", () => {
       validEnv.AUDIT_HMAC_KEY,
       validEnv.ANTHROPIC_API_KEY,
       validEnv.RATE_LIMIT_REDIS_TOKEN,
+      validEnv.HIBP_API_KEY,
     ]) {
       expect(serialized).not.toContain(secret);
     }
@@ -114,6 +123,7 @@ describe("environment validation", () => {
       "AUDIT_HMAC_KEY",
       "ANTHROPIC_API_KEY",
       "RATE_LIMIT_REDIS_TOKEN",
+      "HIBP_API_KEY",
     ]) {
       expect(shape).not.toContain(`NEXT_PUBLIC_${secretName}`);
     }

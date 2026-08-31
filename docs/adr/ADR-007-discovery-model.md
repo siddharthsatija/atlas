@@ -191,7 +191,7 @@ The distinction is at the rule level. The same evidence record may back differen
 
 ### 11. Source-Class Aware Threshold
 
-Candidates from non-breach providers (e.g., username enumeration) surface only at confidence ≥ medium. Breach-corpus candidates from non-aggregator providers (HIBP where `IsAggregator = false`) surface regardless of confidence, because the evidence is a direct corpus hit, not an inference.
+Candidates from non-breach providers (e.g., username enumeration) surface only at confidence ≥ medium. Breach-corpus candidates from service-corpus providers (HIBP where `IsSpamList = false`) surface regardless of confidence, because the evidence is a direct corpus hit, not an inference.
 
 Confidence is derived at generation time and pinned to the rule version that computed it, following ADR-001. The surface threshold is a versioned constant in code, not a stored column. `source_class` is immutable on the evidence record; it may be denormalized onto the candidate row for query performance, since immutability makes denormalization safe.
 
@@ -203,7 +203,7 @@ Confidence is derived at generation time and pinned to the rule version that com
 - Uses k-anonymity: Atlas transmits the first 6 hexadecimal characters of SHA-1(email) to the breached-account range endpoint (`GET /breachedaccount/range/{prefix}`), verified against HIBP API v3 documentation. This is distinct from the Pwned Passwords API (api.pwnedpasswords.com), which uses a 5-character prefix and a different hash function application. The full outbound disclosure specification — two-step flow, hash prefix handling, evidence storage, and logging rules — is in ADR-008 §1 and §6.
 - k-anonymity bypass is structurally impossible: the provider module has no code path capable of constructing a direct-search request. This is a type-level guarantee, following the templates-not-strings discipline.
 - Requires HIBP Pro tier.
-- IsAggregator gate: where `IsAggregator = true` on the breach metadata, the result stores a `discovery_evidence` record but generates neither an account candidate nor a `privacy_findings` row. An aggregator breach implies corpus exposure without implying an account at any specific service; there is no account relationship to adjudicate. The evidence is surfaced through the discovery experience independently of the candidate adjudication flow. The confirmation-first restriction from §7 is not relaxed; finding-subject polymorphism is not introduced.
+- Non-service-corpus gate: where `IsSpamList = true` on the HIBP v3 breach catalogue metadata, the result stores a `discovery_evidence` record but generates neither an account candidate nor a `privacy_findings` row. A spam-list breach implies corpus exposure without implying an account at any specific service; there is no account relationship to adjudicate. The evidence is surfaced through the discovery experience independently of the candidate adjudication flow. The `is_aggregator_attributed` column remains `false` for all HIBP evidence — `IsSpamList` is a distinct semantic and is NOT mapped to `is_aggregator_attributed`. The confirmation-first restriction from §7 is not relaxed; finding-subject polymorphism is not introduced.
 
 **Username enumeration**
 

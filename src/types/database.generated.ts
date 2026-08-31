@@ -504,33 +504,39 @@ export type Database = {
           created_at: string
           evidence_summary: string
           evidence_type: string
+          field_id: string
           id: string
           invocation_id: string
           is_aggregator_attributed: boolean
           provider_class: string
           provider_evidence_json: string | null
+          source_identifier: string
           user_id: string
         }
         Insert: {
           created_at?: string
           evidence_summary: string
           evidence_type: string
+          field_id: string
           id?: string
           invocation_id: string
           is_aggregator_attributed?: boolean
           provider_class: string
           provider_evidence_json?: string | null
+          source_identifier: string
           user_id: string
         }
         Update: {
           created_at?: string
           evidence_summary?: string
           evidence_type?: string
+          field_id?: string
           id?: string
           invocation_id?: string
           is_aggregator_attributed?: boolean
           provider_class?: string
           provider_evidence_json?: string | null
+          source_identifier?: string
           user_id?: string
         }
         Relationships: [

@@ -1,0 +1,61 @@
+import "server-only";
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/types/database.generated";
+
+/**
+ * Data access for `discovery_rejections` (ATL-207, ADR-008 §5, §8).
+ *
+ * A rejection fingerprint is an HMAC-SHA256 over the provider class and the
+ * normalised source identifier, encoded as a JSON envelope:
+ * `{"v":1,"alg":"hmac-sha256","value":"<base64url>"}`.  The fingerprint is
+ * stored with the provider class so queries can scope to one provider without
+ * decoding the envelope.
+ *
+ * ## Fail-closed reads
+ *
+ * `exists` throws on any database error rather than returning `false` silently.
+ * A query failure must never be treated as "no rejection found"; that would
+ * allow a rejected source to surface as a candidate the next time the query
+ * fails.
+ *
+ * ## Logging prohibition (ADR-008 §8)
+ *
+ * Fingerprint values must never appear in logs.  Thrown errors carry no
+ * database detail; PostgREST messages can include row values.
+ */
+export class DiscoveryRejectionStoreError extends Error {
+  constructor(public readonly operation: string) {
+    super(`discovery rejection store failed: ${operation}`);
+    this.name = "DiscoveryRejectionStoreError";
+  }
+}
+
+export class DiscoveryRejectionRepository {
+  private readonly db: SupabaseClient<Database>;
+
+  constructor(db: SupabaseClient<Database>) {
+    this.db = db;
+  }
+
+  /**
+   * Returns `true` when a rejection with the given fingerprint and provider
+   * class already exists for this user.
+   *
+   * Fail-closed: throws `DiscoveryRejectionStoreError` on any database error
+   * rather than returning `false`.  The caller must not insert a candidate when
+   * the rejection check could not be completed.
+   */
+  async exists(userId: string, providerClass: string, fingerprint: string): Promise<boolean> {
+    const { data, error } = await this.db
+      .from("discovery_rejections")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("provider_class", providerClass)
+      .eq("fingerprint", fingerprint)
+      .limit(1);
+
+    if (error) throw new DiscoveryRejectionStoreError("exists");
+    return (data ?? []).length > 0;
+  }
+}
