@@ -135,6 +135,17 @@ export default defineConfig({
         // env.schema.ts; app.ts is a constants module.
         "src/config/env.ts",
         "src/config/app.ts",
+        // Repository/database adapter implementations are exercised by the
+        // `database` integration project against a real Supabase/Postgres
+        // instance with real RLS policies (pnpm test:integration). Their
+        // Supabase query-builder branches are only meaningful when executed
+        // against a live database, so including them in the unit+server
+        // coverage denominator produces a permanently-inflated uncovered
+        // branch count that no unit or server test can close. Repository
+        // correctness is enforced by pnpm test:integration; the fast gate
+        // here measures the logic layers that can be meaningfully covered
+        // without database infrastructure.
+        "src/server/repositories/**",
       ],
       /**
        * A floor, not a goal. Risk-tiered expectations in

@@ -670,3 +670,81 @@ describe("existing method regressions", () => {
     expect(result).toEqual({ ok: true, data: 0 });
   });
 });
+
+describe("store failure catch paths", () => {
+  /**
+   * Lines 138, 264, 332, 376 are catch blocks that `storeFailure` is called
+   * from. The fake repository below throws from each method in turn, driving
+   * each catch branch that the happy-path tests never reach.
+   *
+   * Also covers the two branches of `storeFailure`'s own `instanceof` guard:
+   * an `Error` instance → "STORE_ERROR", and a plain string → "UNKNOWN_ERROR".
+   * Both still return `UNAVAILABLE`; the distinction is in what gets logged.
+   */
+
+  function makeThrowingRepo(error: unknown): typeof FakePersonalFieldRepository.prototype {
+    return {
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      create: () => Promise.reject(error),
+      list: () => Promise.resolve([]),
+      find: () => Promise.resolve(null),
+      update: () => Promise.resolve(null),
+      remove: () => Promise.resolve(false),
+      readValue: () => Promise.resolve(null),
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      markUsed: () => Promise.reject(error),
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      setIncludeInDiscovery: () => Promise.reject(error),
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      listEligible: () => Promise.reject(error),
+      hasActiveInvocationReference: () => Promise.resolve(false),
+    } as unknown as typeof FakePersonalFieldRepository.prototype;
+  }
+
+  function makeService(error: unknown) {
+    const audit = new FakeAuditLog();
+    const consent = new FakeConsentService();
+    consent.granted = true;
+    const svc = new PersonalFieldService({
+      fields: makeThrowingRepo(error),
+      consent,
+      audit,
+    } as never);
+    return svc;
+  }
+
+  it("save: store throw → UNAVAILABLE (covers line 138)", async () => {
+    const svc = makeService(new Error("disk full"));
+    const result = await svc.save(ALICE, { fieldKey: "email", label: "Gmail", value: "x@y.com" });
+    expect(result).toEqual({ ok: false, code: "UNAVAILABLE" });
+  });
+
+  it("markUsed: store throw → UNAVAILABLE (covers line 264)", async () => {
+    const svc = makeService(new Error("timeout"));
+    const result = await svc.markUsed(ALICE, [FIELD_A]);
+    expect(result).toEqual({ ok: false, code: "UNAVAILABLE" });
+  });
+
+  it("setIncludeInDiscovery: store throw → UNAVAILABLE (covers line 332)", async () => {
+    const svc = makeService(new Error("connection lost"));
+    const result = await svc.setIncludeInDiscovery(ALICE, FIELD_A, true);
+    expect(result).toEqual({ ok: false, code: "UNAVAILABLE" });
+  });
+
+  it("getDiscoveryEligibleFields: store throw → UNAVAILABLE (covers line 376)", async () => {
+    const svc = makeService(new Error("read timeout"));
+    const result = await svc.getDiscoveryEligibleFields(ALICE);
+    expect(result).toEqual({ ok: false, code: "UNAVAILABLE" });
+  });
+
+  it("storeFailure: non-Error thrown value → still returns UNAVAILABLE", async () => {
+    /**
+     * `storeFailure`'s ternary: `error instanceof Error ? "STORE_ERROR" : "UNKNOWN_ERROR"`.
+     * This exercises the false arm (non-Error). The result code is identical —
+     * UNAVAILABLE — because the distinction is in what gets logged, not returned.
+     */
+    const svc = makeService("plain string — not an Error instance");
+    const result = await svc.markUsed(ALICE, [FIELD_A]);
+    expect(result).toEqual({ ok: false, code: "UNAVAILABLE" });
+  });
+});

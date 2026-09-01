@@ -149,7 +149,7 @@ function createDb(): SupabaseClient<Database> {
 
 const { FindingService, FOOTPRINT_WIDE_LABEL } = await import("./finding-service");
 const { ActivityWriter } = await import("@/server/activity/activity-writer");
-const { PrivacyFindingRepository } =
+const { PrivacyFindingRepository, PrivacyFindingStoreError } =
   await import("@/server/repositories/privacy-finding-repository");
 
 let service: InstanceType<typeof FindingService>;
@@ -1364,5 +1364,166 @@ describe("listing one asset's findings", () => {
 
     /** Drives the "No open findings for this service." empty state (M2). */
     expect(unwrap(await service.listFindingsForAsset(ALICE, subject))).toEqual([]);
+  });
+});
+
+describe("store failure handling", () => {
+  /**
+   * `storeFailure` is the single place where a `PrivacyFindingStoreError`
+   * becomes the `UNAVAILABLE` result code. Every other thrown value is
+   * re-thrown unchanged so callers can distinguish a database outage (expected,
+   * recoverable) from a programming error (unexpected, should surface).
+   *
+   * The fake DB below rejects every query, driving every public method's
+   * catch block and exercising both branches of the `instanceof` guard.
+   */
+
+  function createThrowingDb(error: Error): SupabaseClient<Database> {
+    /**
+     * Every chaining call returns the same object; every terminal call fails.
+     *
+     * `then` must throw synchronously, not return a rejected Promise. When `await`
+     * encounters a thenable it calls `then(resolve, reject)` in a try-catch; a
+     * synchronous throw causes the machinery to call `reject(thrown)` — which
+     * properly rejects the awaiting expression. Returning `Promise.reject()` from
+     * `then` without calling either callback leaves the promise permanently pending
+     * (the return value of `then` is ignored by the await machinery).
+     */
+    const chain: Record<string, unknown> = {};
+    const self = () => chain;
+    for (const m of [
+      "select",
+      "eq",
+      "in",
+      "is",
+      "or",
+      "order",
+      "limit",
+      "insert",
+      "update",
+      "delete",
+    ]) {
+      chain[m] = self;
+    }
+    chain.single = () => Promise.reject(error);
+    chain.maybeSingle = () => Promise.reject(error);
+    chain.then = (): never => {
+      throw error;
+    };
+    return { from: () => chain } as unknown as SupabaseClient<Database>;
+  }
+
+  const noop = { enqueue: () => Promise.resolve() };
+  const storeErr = () => new PrivacyFindingStoreError();
+
+  it("listFindings: PrivacyFindingStoreError → UNAVAILABLE", async () => {
+    const svc = new FindingService(
+      createThrowingDb(storeErr()),
+      new ActivityWriter(createDb()),
+      noop,
+    );
+    expect(await svc.listFindings(ALICE)).toEqual({ ok: false, code: "UNAVAILABLE" });
+  });
+
+  it("listFindings: non-store error → rethrows", async () => {
+    const err = new RangeError("unexpected");
+    const svc = new FindingService(createThrowingDb(err), new ActivityWriter(createDb()), noop);
+    await expect(svc.listFindings(ALICE)).rejects.toBe(err);
+  });
+
+  it("listFindingsForAsset: PrivacyFindingStoreError → UNAVAILABLE", async () => {
+    const svc = new FindingService(
+      createThrowingDb(storeErr()),
+      new ActivityWriter(createDb()),
+      noop,
+    );
+    expect(await svc.listFindingsForAsset(ALICE, randomUUID())).toEqual({
+      ok: false,
+      code: "UNAVAILABLE",
+    });
+  });
+
+  it("getFinding: PrivacyFindingStoreError → UNAVAILABLE", async () => {
+    const svc = new FindingService(
+      createThrowingDb(storeErr()),
+      new ActivityWriter(createDb()),
+      noop,
+    );
+    expect(await svc.getFinding(ALICE, randomUUID())).toEqual({
+      ok: false,
+      code: "UNAVAILABLE",
+    });
+  });
+
+  it("resolveFinding: PrivacyFindingStoreError → UNAVAILABLE", async () => {
+    const svc = new FindingService(
+      createThrowingDb(storeErr()),
+      new ActivityWriter(createDb()),
+      noop,
+    );
+    expect(await svc.resolveFinding(ALICE, randomUUID(), "reviewed")).toEqual({
+      ok: false,
+      code: "UNAVAILABLE",
+    });
+  });
+
+  it("dismissFinding: PrivacyFindingStoreError → UNAVAILABLE", async () => {
+    const svc = new FindingService(
+      createThrowingDb(storeErr()),
+      new ActivityWriter(createDb()),
+      noop,
+    );
+    expect(await svc.dismissFinding(ALICE, randomUUID())).toEqual({
+      ok: false,
+      code: "UNAVAILABLE",
+    });
+  });
+
+  it("undismissFinding: PrivacyFindingStoreError → UNAVAILABLE", async () => {
+    const svc = new FindingService(
+      createThrowingDb(storeErr()),
+      new ActivityWriter(createDb()),
+      noop,
+    );
+    expect(await svc.undismissFinding(ALICE, randomUUID())).toEqual({
+      ok: false,
+      code: "UNAVAILABLE",
+    });
+  });
+});
+
+describe("score queue failure is best-effort", () => {
+  /**
+   * §9 and ADR-004 make every user action trigger a recalculation, but the
+   * queue write is deliberately not atomic with the status change. A dropped
+   * enqueue costs a stale score until the nightly sweep; the user's action
+   * already committed and cannot be retried, so reporting failure would be
+   * false.
+   */
+
+  it("a failing score.enqueue does not fail the resolution", async () => {
+    const id = seed();
+    const db = createDb();
+    const svc = new FindingService(db, new ActivityWriter(db), {
+      enqueue: () => Promise.reject(new Error("queue down")),
+    });
+
+    const result = await svc.resolveFinding(ALICE, id, "reviewed");
+
+    expect(result.ok).toBe(true);
+    expect(stored(id)?.status).toBe("resolved");
+  });
+
+  it("a failing score.enqueue does not fail the dismissal", async () => {
+    const id = seed();
+    const db = createDb();
+    const svc = new FindingService(db, new ActivityWriter(db), {
+      enqueue: () => Promise.reject(new Error("queue down")),
+    });
+
+    const result = await svc.dismissFinding(ALICE, id);
+
+    expect(result.ok).toBe(true);
+    expect(stored(id)?.status).toBe("dismissed");
   });
 });

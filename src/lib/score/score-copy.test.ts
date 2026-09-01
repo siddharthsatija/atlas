@@ -110,3 +110,175 @@ describe("pluralisation", () => {
     expect(FACTOR_COPY.open_findings.inputSummary({ deductingFindings: count })).toBe(expected);
   });
 });
+describe("account_hygiene inputSummary", () => {
+  /**
+   * The account_hygiene factor has two independent components in its summary:
+   * how many active services were reviewed, and — only when the user has
+   * finished-with services — how many of those were archived or removed.
+   * The second clause must only appear when there is something to say.
+   */
+  it("includes both clauses when addressableAssets is greater than zero", () => {
+    const summary = FACTOR_COPY.account_hygiene.inputSummary({
+      activeReviewed: 3,
+      activeAssets: 5,
+      addressableAssets: 2,
+      addressed: 1,
+    });
+
+    expect(summary).toBe(
+      "3 of 5 active services reviewed in the last 180 days" +
+        "; 1 of 2 finished-with services archived or removed",
+    );
+  });
+
+  it("omits the finished-with clause when addressableAssets is zero", () => {
+    const summary = FACTOR_COPY.account_hygiene.inputSummary({
+      activeReviewed: 2,
+      activeAssets: 4,
+      addressableAssets: 0,
+      addressed: 0,
+    });
+
+    expect(summary).toBe("2 of 4 active services reviewed in the last 180 days");
+    expect(summary).not.toMatch(/finished-with/);
+  });
+
+  it("uses the singular for a single active service", () => {
+    const summary = FACTOR_COPY.account_hygiene.inputSummary({
+      activeReviewed: 1,
+      activeAssets: 1,
+      addressableAssets: 0,
+    });
+
+    expect(summary).toContain("1 active service");
+    expect(summary).not.toContain("1 active services");
+  });
+
+  it("uses the singular for a single finished-with service", () => {
+    const summary = FACTOR_COPY.account_hygiene.inputSummary({
+      activeReviewed: 0,
+      activeAssets: 2,
+      addressableAssets: 1,
+      addressed: 1,
+    });
+
+    expect(summary).toContain("1 finished-with service archived");
+    expect(summary).not.toContain("1 finished-with services");
+  });
+
+  it("falls back to zero for every missing input", () => {
+    /**
+     * All inputs are optional. When the caller supplies none — e.g. during
+     * cold start before any assets exist — the summary must still be a
+     * grammatically complete sentence rather than containing 'undefined'.
+     */
+    const summary = FACTOR_COPY.account_hygiene.inputSummary({});
+
+    expect(summary).not.toContain("undefined");
+    expect(summary).toContain("0 of 0 active services");
+    // No finished-with clause: (undefined ?? 0) > 0 is false.
+    expect(summary).not.toMatch(/finished-with/);
+  });
+});
+
+describe("data_sensitivity inputSummary", () => {
+  it("reports the number of sensitive records in the plural", () => {
+    const summary = FACTOR_COPY.data_sensitivity.inputSummary({ sensitivePairs: 7 });
+
+    expect(summary).toBe("7 sensitive records across your active services");
+  });
+
+  it("uses the singular for a single sensitive record", () => {
+    const summary = FACTOR_COPY.data_sensitivity.inputSummary({ sensitivePairs: 1 });
+
+    expect(summary).toBe("1 sensitive record across your active services");
+    expect(summary).not.toContain("1 sensitive records");
+  });
+
+  it("falls back to zero when sensitivePairs is absent", () => {
+    const summary = FACTOR_COPY.data_sensitivity.inputSummary({});
+
+    expect(summary).toContain("0 sensitive records");
+    expect(summary).not.toContain("undefined");
+  });
+});
+
+describe("permission_exposure inputSummary", () => {
+  it("reports broad active count out of total recorded permissions", () => {
+    const summary = FACTOR_COPY.permission_exposure.inputSummary({
+      broadActive: 3,
+      recordedPermissions: 8,
+    });
+
+    expect(summary).toBe("3 of 8 recorded permissions are broad and active");
+  });
+
+  it("uses the singular for a single recorded permission", () => {
+    const summary = FACTOR_COPY.permission_exposure.inputSummary({
+      broadActive: 1,
+      recordedPermissions: 1,
+    });
+
+    expect(summary).toContain("1 recorded permission");
+    expect(summary).not.toContain("1 recorded permissions");
+  });
+
+  it("falls back to zero for missing inputs", () => {
+    const summary = FACTOR_COPY.permission_exposure.inputSummary({});
+
+    expect(summary).toContain("0 of 0 recorded permissions");
+    expect(summary).not.toContain("undefined");
+  });
+});
+
+describe("verification_freshness inputSummary", () => {
+  it("reports verified-recently count out of total verifiable assets", () => {
+    const summary = FACTOR_COPY.verification_freshness.inputSummary({
+      verifiedRecently: 4,
+      verifiableAssets: 6,
+    });
+
+    expect(summary).toBe("4 of 6 services confirmed in the last year");
+  });
+
+  it("uses the singular for a single verifiable service", () => {
+    const summary = FACTOR_COPY.verification_freshness.inputSummary({
+      verifiedRecently: 1,
+      verifiableAssets: 1,
+    });
+
+    expect(summary).toContain("1 of 1 service confirmed");
+    expect(summary).not.toContain("1 services");
+  });
+
+  it("falls back to zero for missing inputs", () => {
+    const summary = FACTOR_COPY.verification_freshness.inputSummary({});
+
+    expect(summary).toContain("0 of 0 services");
+    expect(summary).not.toContain("undefined");
+  });
+});
+
+describe("protective_actions inputSummary pluralisation", () => {
+  /**
+   * The existing suite already asserts the plural case (resolvedByUser: 2).
+   * These cover the singular and the zero / undefined paths that exercise the
+   * ?? 0 fallback — both of which are distinct from the plural for the same
+   * reason the open_findings pluralisation tests are: a UI that printed
+   * "1 findings you resolved" is wrong, and a UI that printed "undefined
+   * findings" would be worse.
+   */
+  it("uses the singular for a single resolved finding", () => {
+    const summary = FACTOR_COPY.protective_actions.inputSummary({ resolvedByUser: 1 });
+
+    expect(summary).toBe("1 finding you resolved in the last 180 days.");
+    expect(summary).not.toContain("1 findings");
+  });
+
+  it("falls back to zero when resolvedByUser is absent", () => {
+    const summary = FACTOR_COPY.protective_actions.inputSummary({});
+
+    expect(summary).toBe("0 findings you resolved in the last 180 days.");
+    expect(summary).not.toContain("undefined");
+  });
+});

@@ -215,12 +215,13 @@ test.describe("header actions", () => {
    * an assertion that Archive is "present, unavailable and explained" is now
    * false rather than merely weaker.
    *
-   * The two request controls are unchanged. ATL-056/057 own them and
-   * `data_requests` still has no migration.
+   * "Request deletion" left this list in ATL-058: Step 1 of the request flow is
+   * now built — the control navigates to the draft-and-review route. Only
+   * "Request correction" remains deferred, because correction requests are a
+   * distinct capability that does not yet exist.
    */
   const DEFERRED = [
-    ["Request correction", "Atlas cannot make data requests yet."],
-    ["Request deletion", "Atlas cannot make data requests yet."],
+    ["Request correction", "Correction requests are not built yet. Deletion requests are."],
   ] as const;
 
   for (const [label, reason] of DEFERRED) {
@@ -252,6 +253,24 @@ test.describe("header actions", () => {
       expect(reached, `${label} should remain in the tab order`).toBe(true);
     });
   }
+
+  test("offers a live Request deletion link to the draft-and-review route", async ({ page }) => {
+    await openDetail(page);
+
+    /**
+     * ATL-058 Step 1: "Request deletion" is now a navigation link, not an
+     * aria-disabled button. The route it points to is the draft-and-review
+     * surface that lets the user prepare a deletion request before sending it
+     * themselves.
+     */
+    const control = headerActions(page).getByRole("link", {
+      name: /Request deletion/,
+    });
+
+    await expect(control).toBeVisible();
+    await expect(control).not.toHaveAttribute("aria-disabled");
+    await expect(control).toHaveAttribute("href", new RegExp(`/assets/${seeded.assetId}/request`));
+  });
 
   test("opens More from the shared dropdown primitive and offers nothing unbuilt", async ({
     page,
@@ -328,7 +347,7 @@ test.describe("the requests section", () => {
     const requests = section(page, "requests");
     await summaryOf(requests).press("Enter");
 
-    await expect(requests).toContainText(/Atlas cannot make data requests yet/i);
+    await expect(requests).toContainText(/No requests have been prepared for this service yet/i);
 
     /** Nothing that would suggest a request exists, is moving, or was sent. */
     await expect(requests).not.toHaveText(/\b(sent|submitted|pending|awaiting|in progress)\b/i);
