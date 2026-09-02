@@ -451,10 +451,50 @@ export type Database = {
           },
         ]
       }
+      discovery_candidate_evidence: {
+        Row: {
+          candidate_id: string
+          created_at: string
+          evidence_id: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          candidate_id: string
+          created_at?: string
+          evidence_id: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          candidate_id?: string
+          created_at?: string
+          evidence_id?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discovery_candidate_evidence_candidate_fkey"
+            columns: ["user_id", "candidate_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_candidates"
+            referencedColumns: ["user_id", "id"]
+          },
+          {
+            foreignKeyName: "discovery_candidate_evidence_evidence_fkey"
+            columns: ["user_id", "evidence_id"]
+            isOneToOne: false
+            referencedRelation: "discovery_evidence"
+            referencedColumns: ["user_id", "id"]
+          },
+        ]
+      }
       discovery_candidates: {
         Row: {
           adjudicated_at: string | null
           asset_id: string | null
+          canonical_profile_uri: string | null
           created_at: string
           evidence_id: string
           id: string
@@ -465,6 +505,7 @@ export type Database = {
         Insert: {
           adjudicated_at?: string | null
           asset_id?: string | null
+          canonical_profile_uri?: string | null
           created_at?: string
           evidence_id: string
           id?: string
@@ -475,6 +516,7 @@ export type Database = {
         Update: {
           adjudicated_at?: string | null
           asset_id?: string | null
+          canonical_profile_uri?: string | null
           created_at?: string
           evidence_id?: string
           id?: string
@@ -1108,7 +1150,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      create_canonical_candidate: {
+        Args: {
+          p_user_id: string
+          p_candidate_id: string
+          p_evidence_id: string
+          p_canonical_profile_uri: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
