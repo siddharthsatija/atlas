@@ -30,7 +30,7 @@ A ticket is done only when acceptance criteria pass, authorization and validatio
 | M10       | Activity, archive, search, settings      | 070, 071, 072, 073, 074, 075, 076, 077                                         |
 | M11       | Privacy operations                       | 079, 080, 081, 082, 110                                                        |
 | M12       | Quality and launch                       | 088, 091, 092, 093, 094, 096, 097, 098, 099, 100                               |
-| M13       | Discovery                                | 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 214          |
+| M13       | Discovery                                | 200, 201, 202, 203, 204, 205, 206, 207, 216, 215, 208, 209, 210, 211, 212, 217, 214 |
 
 ---
 
@@ -1765,9 +1765,56 @@ Changes:
 
 ---
 
+### ATL-216 · Make HIBP Configuration Optional
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** S · **Depends on:** ATL-207
+
+**Objective:** Remove the hard requirement for `HIBP_API_KEY` at Atlas application startup. HIBP is parked and must not prevent the application from booting in environments where no HIBP key is configured.
+
+**Acceptance criteria**
+
+- `HIBP_API_KEY` in `src/config/env.schema.ts` is changed from required (`z.string().min(1, "HIBP_API_KEY is required")`) to optional (`z.string().min(1).optional()`). The application starts successfully with `HIBP_API_KEY` absent from the environment.
+- `HibpAdapter.create()` in `src/server/discovery/hibp-adapter.ts` handles the absence of `HIBP_API_KEY` at instantiation time, not at boot time. If the adapter is instantiated without a key configured, it throws a descriptive configuration error immediately (e.g. `HIBP_NOT_CONFIGURED`). If HIBP is not registered in the provider registry, `create()` is never called and no error occurs at boot.
+- No HIBP product behavior changes: the adapter remains parked and is not wired into the provider registry for any environment.
+- No discovery UX changes.
+- No existing tests are weakened or skipped.
+
+**Testing:** application boots without `HIBP_API_KEY` in the environment; `HibpAdapter.create()` throws `HIBP_NOT_CONFIGURED` when key is absent; existing `HibpAdapter` unit tests continue to pass with the key present.
+
+---
+
+### ATL-215 · Canonical External-Profile Identity
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-202, ATL-207
+
+**Objective:** Establish the Atlas data model invariant that multiple verified emails and multiple discovery providers identifying the same external profile must resolve to one `discovery_candidates` row and, after confirmation, one `digital_assets` row. Multiple evidence records may support that single identity.
+
+**Product invariant:** For any user, at any given time, at most one `discovery_candidates` row may exist per `canonical_profile_uri` value. Multiple `discovery_candidate_evidence` rows may reference that candidate from different invocations, emails, or providers.
+
+**Approved architecture**
+
+- `discovery_candidates` gains a new nullable `canonical_profile_uri text` column. Null is permitted for provider results that do not correspond to an external addressable profile (e.g. breach-exposure evidence). All statuses participate in canonical uniqueness: a partial unique index on `(user_id, canonical_profile_uri) WHERE canonical_profile_uri IS NOT NULL` is the schema-layer integrity constraint.
+- A new `discovery_candidate_evidence` join table provides the many-evidence → one-candidate relationship. Each `discovery_evidence` row maps to at most one candidate. The originating `discovery_candidates.evidence_id` column is retained as immutable provenance of the first evidence record that created the candidate.
+- Atlas owns canonical URI normalization in a shared module (`src/server/discovery/external-profile-uri.ts` or the repository-consistent equivalent). Provider CandidateWriters must not implement independent normalization.
+- No provider-specific identifier (e.g. a vendor person ID) may become Atlas's canonical profile identity.
+
+**Acceptance criteria**
+
+- New forward migration: adds `canonical_profile_uri text` to `discovery_candidates`; creates the partial unique index on `(user_id, canonical_profile_uri) WHERE canonical_profile_uri IS NOT NULL`; creates `discovery_candidate_evidence (id, user_id, candidate_id, evidence_id, created_at)` with cross-user composite FKs to `discovery_candidates` and `discovery_evidence`, and a unique constraint on `(user_id, evidence_id)`. The existing `discovery_candidates.evidence_id` column and the ATL-202 migration are not modified.
+- Shared normalization module exports `normalizeExternalProfileUri(rawUri: string): string | null`. Returns `null` for unparseable input, non-http/https schemes, and non-ASCII hostnames. Applies only universally safe normalization to all URIs: lowercase scheme and host, strip default port, strip trailing path slash, decode unreserved percent-encoded characters. For unknown or unregistered domains, query parameters, fragments, meaningful subdomains, and path case are preserved; HTTP and HTTPS are treated as distinct schemes; no platform aliases are applied. Any transformation that could collapse two distinct resources on an unknown domain is prohibited in the generic layer. Known-platform canonicalization is applied only through an Atlas-owned registry of explicitly supported platforms; registered rules may include: non-identity query parameter stripping, non-identity fragment stripping, `www`/mobile subdomain normalization, path-segment case normalization, and host alias resolution (e.g. `x.com` ↔ `twitter.com`). Providers must not implement independent normalization; the shared Atlas module is the sole authority on canonical URI form.
+- `DiscoveryCandidateWriter` interface (or equivalent) is updated to require `canonical_profile_uri: string | null` as output from providers and to write the founding evidence to both `discovery_candidates.evidence_id` and `discovery_candidate_evidence`.
+- CandidateWriter lookup contract: before inserting a new candidate, the writer looks up any existing candidate for `(user_id, canonical_profile_uri)`. Status-conditional behavior on match: `pending` / `confirmed` / `not_sure` — add evidence to `discovery_candidate_evidence` only, no new candidate row; `dismissed` — add evidence to join table and transition status to `pending` (new evidence legitimately resurfaces a dismissed profile); `rejected` — add evidence to join table for provenance audit without changing status or creating a new candidate row; subsequent evidence for an already-rejected profile must not cause unnecessary retention of provider data beyond what audit requires.
+- Rejection fingerprint compatibility (ATL-208 interlock): for MVP (single active provider class), `CandidateAdjudicationService.reject` and `deconfirm` continue to compute the HMAC fingerprint from the originating `evidence_id` record's `(provider_class, source_identifier)`. Multi-provider fingerprint batching (writing one fingerprint per distinct `(provider_class, source_identifier)` pair in `discovery_candidate_evidence`) is deferred and documented here as a known future requirement.
+- `discovery_rejections` schema and `RejectionKeyService` (ATL-203) are not modified by this ticket.
+- No `confidence_tier` column.
+
+**Testing:** two invocations for different emails resolving to the same `canonical_profile_uri` produce one candidate row and two `discovery_candidate_evidence` rows; a third invocation from a different provider class for the same URI also routes to the existing candidate; `dismissed` candidate transitions to `pending` on new evidence; `rejected` candidate receives evidence in join table without status change; normalization is deterministic (same input always produces the same output); known-platform rules applied only for registered platforms; `null` returned for invalid input; no provider-specific ID stored as canonical URI.
+
+---
+
 ### ATL-208 · Candidate adjudication service
 
-**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-202, ATL-203, ATL-207
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-202, ATL-203, ATL-207, ATL-215
 
 **Objective:** Implement `CandidateAdjudicationService` for the four adjudication outcomes (Confirm, Reject, Dismiss, Not sure) and the atomic de-confirmation operation (ADR-007 §7, §9).
 
@@ -1777,10 +1824,12 @@ Changes:
 - `reject(userId, candidateId)`: sets `discovery_candidates.status = 'rejected'`; computes the HMAC rejection fingerprint using `RejectionKeyService` (ATL-203) and writes to `discovery_rejections`; emits `discovery.candidate.adjudicated` (outcome: `rejected`) audit event.
 - `dismiss(userId, candidateId)`: sets `discovery_candidates.status = 'dismissed'`; no fingerprint written; emits `discovery.candidate.adjudicated` (outcome: `dismissed`) audit event.
 - `markNotSure(userId, candidateId)`: sets `discovery_candidates.status = 'not_sure'`; no fingerprint written; emits `discovery.candidate.adjudicated` (outcome: `not_sure`) audit event. `not_sure` rate is a provider-quality signal and should be surfaced in monitoring (ADR-007 §7).
-- `deconfirm(userId, assetId)`: atomic transaction executing steps in ADR-007 §9 order: (1) resolve all open `privacy_findings` against the asset with `resolved_by = 'system'` and a structured `source_reference` of `asset_deconfirmed`; (2) soft-delete the `digital_assets` row by setting `deleted_at = now()` (the row is retained for audit; it does not cascade-delete the candidate or evidence); (3) move the originating `discovery_candidates` row to `status = 'rejected'`; (4) write a rejection fingerprint to `discovery_rejections`. Emits `discovery.candidate.deconfirmed` audit event. Not available on manually-added assets (`source_type != 'discovery'` returns a structured NOT_FOUND error).
+- `deconfirm(userId, assetId)`: atomic transaction executing steps in ADR-007 §9 order: (1) resolve all open `privacy_findings` against the asset with `resolved_by = 'system'` and a structured `source_reference` of `asset_deconfirmed`; (2) soft-delete the `digital_assets` row by setting `deleted_at = now()` (the row is retained for audit; it does not cascade-delete the candidate or evidence); (3) move the originating `discovery_candidates` row to `status = 'rejected'`; (4) write a rejection fingerprint to `discovery_rejections`. Emits `discovery.candidate.deconfirmed` audit event. Not available on manually-added assets: `deconfirm` must verify `digital_assets.source_type = 'discovery'` before proceeding; if the asset was created manually, return a domain error (`DECONFIRM_NOT_DISCOVERY`) rather than propagating a database failure.
 - All operations verify ownership using the non-oracle pattern (cross-user call returns NOT_FOUND, indistinguishable from a missing record).
+- All five operations are provider-neutral. No operation references a specific discovery provider class or assumes a particular provider's evidence structure.
+- Rejection fingerprint compatibility (ATL-215 interlock): for MVP (single active provider class), fingerprints are computed from the originating `evidence_id` record's `(provider_class, source_identifier)`. Multi-provider fingerprint batching — writing one fingerprint per distinct `(provider_class, source_identifier)` pair across all `discovery_candidate_evidence` rows for a candidate — is deferred and documented as a known future requirement once multiple providers contribute evidence to the same candidate.
 
-**Testing:** all four adjudication outcomes; `confirm` creates a `digital_assets` row with correct columns; `reject` writes fingerprint; `deconfirm` executes steps in ADR-007 §9 order (assert transaction atomicity); `deconfirm` on a manual asset returns NOT_FOUND; cross-user denial on all operations; C1-D DB constraint does not fire on a valid `confirm` call.
+**Testing:** all four adjudication outcomes; `confirm` creates a `digital_assets` row with correct columns; `reject` writes fingerprint; `deconfirm` executes steps in ADR-007 §9 order (assert transaction atomicity); `deconfirm` on a non-discovery (manually-added) asset returns `DECONFIRM_NOT_DISCOVERY` domain error; cross-user denial on all operations; C1-D DB constraint does not fire on a valid `confirm` call.
 
 ---
 
@@ -1792,7 +1841,8 @@ Changes:
 
 **Acceptance criteria**
 
-- Onboarding step: user can add at least one email address; name, phone, location, and usernames are optional. Each field shows its current `include_in_discovery` state. User can enable or disable discovery per field. At least one email with `include_in_discovery = true` is required before the discovery run step (soft enforcement with a visible prompt, not a hard block).
+- Onboarding step: user can add at least one email address; name, phone, and location are optional. Each field shows its current `include_in_discovery` state. User can enable or disable discovery per field. At least one email with `include_in_discovery = true` is required before the discovery run step (soft enforcement with a visible prompt, not a hard block).
+- Usernames, handles, and external account identifiers are discovery outputs, not onboarding identity inputs. Atlas must not ask the user to manually enumerate existing accounts or provide known usernames/handles as a prerequisite for discovery. The product flow is: minimal identity → Atlas discovers services/accounts/profiles → user reviews findings → user confirms/rejects → dashboard.
 - Settings > Identity Profile: same add/edit/delete capabilities as onboarding, plus bulk view and per-field deletion with a confirmation step. Fields masked by default; reveal is an explicit action.
 - `include_in_discovery` toggle is labeled clearly (e.g. "Use for discovery") and accompanied by a one-line explanation of what it enables.
 - Deleting a field that is currently in an active discovery invocation shows a warning explaining why the delete is blocked (from `PersonalFieldService.removeField`, ATL-204).
@@ -1808,19 +1858,28 @@ Changes:
 
 **Epic:** Discovery · **Priority:** P0 · **Complexity:** M · **Depends on:** ATL-205, ATL-209
 
-**Objective:** Build the consent grant and first-disclosure acknowledgment flows in onboarding and in Settings > Discovery (FR-16, FR-02): display the three distinct disclosure-type notices, gate discovery start on active consent, and surface consent management in settings.
+**Objective:** Build the consent grant, first-disclosure acknowledgment, and run-status flows in onboarding and in Settings > Discovery (FR-16, FR-02). The UI operates from the active provider's generic `consentType`, `disclosureClass`, and `disclosureContractVersion` contracts — no provider-specific copy or disclosure logic is hard-coded here.
+
+**Architectural constraint:** All consent and disclosure components accept `consentType: DiscoveryConsentType`, `disclosureClass: DisclosureClass`, and `disclosureContractVersion: string` as inputs sourced from the active `DiscoveryProviderAdapter`. The notice content for each `(disclosureClass, disclosureContractVersion)` pair is maintained in a provider/version-keyed content map; a placeholder is rendered for any pair not yet in the map. No provider name, transmission mechanism, or field-handling description is written directly into component source.
 
 **Acceptance criteria**
 
-- Onboarding — hashed-query consent (HIBP): the notice explains that a partial hash derived from the email address (not the plaintext email) is transmitted; no per-field acknowledgment dialog is presented for this provider class (ADR-008 §3); a single consent-grant confirmation is required before the discovery run.
-- Onboarding — identifying provider: a first-disclosure acknowledgment dialog shows the exact handle value and named provider before the first transmission of each `(field, provider)` pair. Cancelling blocks only that invocation; it does not modify the field value, `include_in_discovery`, or standing consent.
-- Broker-search queries are not part of the initial onboarding discovery run and are not surfaced here.
+- Onboarding — consent grant: the consent notice is rendered from the active provider's `disclosureClass` and `disclosureContractVersion`. The notice clearly describes the nature of the disclosure (what category of information is shared and with whom, at the level appropriate to the `disclosureClass`) without hard-coding assumptions about any specific provider. A single consent-grant confirmation is required before the discovery run begins.
+- Onboarding — first-disclosure acknowledgment: for disclosure classes that require per-field acknowledgment (ADR-008 §3), a first-disclosure dialog is presented for each `(field, provider)` pair before the field value is transmitted. The dialog content is sourced from the provider/version content map. Cancelling blocks only that invocation; it does not modify the field value, `include_in_discovery`, or standing consent.
+- For disclosure classes that do not require per-field acknowledgment (ADR-008 §3), no per-field dialog is presented; a single run-level consent confirmation suffices.
 - Settings > Discovery: list active consents with provider class and grant date; revoke consent per provider class behind a confirmation modal that explains consequences; view first-disclosure acknowledgment history per field and provider.
 - Revoking consent in Settings does not cancel in-progress runs that have already passed dispatch; the UI explains this.
 - All consent grant and revoke actions are confirmed in a modal before the service call.
-- States: loading, no-consents-yet, active-consent-list, revoke-confirmation, acknowledgment-history.
+- **Run-status states** — the following six states are explicitly implemented and visually distinct:
+  - `running`: progress indicator; no candidate list shown.
+  - `completed` + candidates present: transition to candidate adjudication surface (ATL-211).
+  - `completed` + zero candidates: neutral informational state communicating that Atlas searched the configured identity sources and did not find profiles to show for the fields queried. This state must not assert that the user has no digital footprint; it communicates the scope and result of this specific run. Re-run is available subject to rate-limit policy.
+  - `partial`: some invocations succeeded and some failed; partial results shown with a notice that the run was incomplete.
+  - `failed`: all invocations non-successful; no candidates surfaced. Retry is available. Error detail is sourced from the closed `error_code` vocabulary on invocations (ATL-201); no raw provider error is exposed.
+  - `blocked`: all invocations blocked by dispatch checks (consent, field eligibility, or configuration). Routes the user to the relevant consent or field-setup flow based on `error_code`.
+- No provider-specific copy. No provider name appears in generic UI components.
 
-**Testing:** hashed-query notice shown without per-field dialog; identifying-provider dialog shown for each field; cancel blocks invocation only (field value and consent unchanged); revoke consent reflected in Settings; keyboard-only flow through both consent paths.
+**Testing:** consent notice renders from `disclosureClass`/`disclosureContractVersion` inputs; per-field acknowledgment dialog shown only for disclosure classes that require it; cancel blocks invocation only (field value and consent unchanged); revoke consent reflected in Settings; all six run-status states render correctly with correct affordances; zero-candidate state copy does not assert "no digital footprint"; failed and blocked states route correctly; keyboard-only flow through consent and status paths.
 
 ---
 
@@ -1866,9 +1925,31 @@ Changes:
 
 ---
 
+### ATL-217 · Phase-1 External Identity Provider Adapter
+
+**Epic:** Discovery · **Priority:** P0 · **Complexity:** L · **Depends on:** ATL-215, ATL-208, ATL-206
+
+**Objective:** Implement the first production external identity discovery provider adapter. The implementation must satisfy the `DiscoveryProviderAdapter` interface (ATL-206) and produce canonical candidates via the `DiscoveryCandidateWriter` contract established by ATL-215. This ticket makes the end-to-end vertical slice — verified email → provider dispatch → canonical profile candidate → confirm/reject → digital asset — operational in production.
+
+**Scope and constraints**
+
+- The adapter must implement `DiscoveryProviderAdapter`: declare `providerClass`, `consentType`, `disclosureClass`, `disclosureContractVersion`, and `eligibleFieldTypes` as constants that reflect the provider's actual disclosure model. These values gate consent checks, disclosure acknowledgment, and dispatch eligibility in the existing dispatch engine (ATL-206) without any changes to that engine.
+- The result writer must call `normalizeExternalProfileUri` from the shared Atlas normalization module (`src/server/discovery/external-profile-uri.ts`, ATL-215) to produce `canonical_profile_uri`. Independent normalization inside the result writer is prohibited.
+- `canonical_profile_uri` must be derived from the external profile's addressable URL, not from any vendor-internal identifier. The vendor's internal person or record ID may be stored in encrypted `provider_evidence_json` as provenance but must not become Atlas's canonical profile identity.
+- The candidate writer must implement the full lookup contract defined by ATL-215: before inserting a new candidate, look up any existing candidate for `(user_id, canonical_profile_uri)` and apply status-conditional behavior (pending/confirmed/not_sure → add evidence to join table only; dismissed → add evidence and transition to pending; rejected → add evidence to join table for provenance without changing status or creating a new candidate row).
+- Evidence writes use `ON CONFLICT DO NOTHING` against the ATL-207 five-part unique constraint `(user_id, invocation_id, provider_class, field_id, source_identifier)` for idempotent evidence writes under concurrent invocations.
+- The adapter must never log, store unencrypted, or include in `evidence_summary` any user-identifying field value beyond what the encrypted `provider_evidence_json` column permits (ADR-008 §7). No field value may appear in URLs, page titles, audit event payloads, or structured logs.
+- Valid provider credentials/API key are required at runtime. Implementation must be consistent with applicable provider terms of service.
+
+**Non-goals:** modification of the dispatch engine, `CandidateAdjudicationService`, or any existing migration; connected mailbox sources (Phase 2); `confidence_tier`; cross-provider deduplication beyond what ATL-215 provides.
+
+**Testing:** adapter satisfies `DiscoveryProviderAdapter` type contract; two field queries resolving to the same `canonical_profile_uri` produce one candidate row and two `discovery_candidate_evidence` rows; evidence ON CONFLICT DO NOTHING under duplicate invocation; dismissed candidate transitions to pending on new evidence; rejected candidate receives evidence in join table without status change or new candidate creation; rate-limit and error paths set correct terminal `invocation_status`; no user field value appears in any unencrypted output.
+
+---
+
 ### ATL-214 · Discovery-first end-to-end core journey tests
 
-**Epic:** Quality · **Priority:** P0 · **Complexity:** XL · **Depends on:** ATL-211, ATL-092
+**Epic:** Quality · **Priority:** P0 · **Complexity:** XL · **Depends on:** ATL-217, ATL-211, ATL-092
 
 **Objective:** Extend the ATL-092 suite with the discovery-first primary onboarding journey (PRD §9.1 steps 1–9): Identity Profile construction, field-for-discovery selection, discovery consent (hashed-query and identifying-provider paths), initial discovery run, and optional candidate adjudication. Also covers the upgrade-onboarding path for users who completed pre-M13 onboarding. This ticket makes the canonical discovery-first journey exercisable end-to-end in CI.
 
