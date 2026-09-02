@@ -6,7 +6,13 @@ import { HibpDiscoveryService } from "./hibp-discovery-service";
 vi.mock("server-only", () => ({}));
 vi.mock("@/server/db/service-role-client", () => ({ createServiceRoleClient: () => ({}) }));
 vi.mock("@/config/env", () => ({
-  env: { AUDIT_HMAC_KEY: Buffer.alloc(32, 7).toString("base64") },
+  env: {
+    AUDIT_HMAC_KEY: Buffer.alloc(32, 7).toString("base64"),
+    // ATL-216: HIBP_API_KEY is optional at boot but HibpAdapter.create() requires
+    // it at instantiation time. HibpDiscoveryService constructs a HibpAdapter in
+    // its constructor, so the test mock must supply a placeholder key.
+    HIBP_API_KEY: "test-hibp-key",
+  },
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

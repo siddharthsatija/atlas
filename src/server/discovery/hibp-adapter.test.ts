@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiscoveryEligibleField } from "@/server/personal-fields/personal-field-service";
-import { HibpAdapter } from "./hibp-adapter";
+import { HibpAdapter, HibpNotConfiguredError } from "./hibp-adapter";
 import type { HibpBreachMatch } from "./hibp-adapter";
+import { env } from "@/config/env";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/server/db/service-role-client", () => ({
@@ -486,6 +487,46 @@ describe("HibpAdapter", () => {
         expect(breach?.IsVerified).toBe(true);
         expect(breach?.PwnCount).toBe(152445165);
         expect(breach?.isSpamList).toBe(false);
+      }
+    });
+  });
+
+  // ── HibpAdapter.create() — ATL-216 ────────────────────────────────────────
+
+  describe("HibpAdapter.create()", () => {
+    it("returns a HibpAdapter instance when HIBP_API_KEY is present", () => {
+      // The module-level vi.mock provides HIBP_API_KEY: "test-api-key".
+      const instance = HibpAdapter.create();
+      expect(instance).toBeInstanceOf(HibpAdapter);
+    });
+
+    it("throws HibpNotConfiguredError when HIBP_API_KEY is absent", () => {
+      // Temporarily remove the key from the mocked env object, restore in finally.
+      const mockedEnv = env as Record<string, unknown>;
+      const saved = mockedEnv.HIBP_API_KEY;
+      mockedEnv.HIBP_API_KEY = undefined;
+      try {
+        expect(() => HibpAdapter.create()).toThrow(HibpNotConfiguredError);
+      } finally {
+        mockedEnv.HIBP_API_KEY = saved;
+      }
+    });
+
+    it("HibpNotConfiguredError carries code HIBP_NOT_CONFIGURED", () => {
+      const mockedEnv = env as Record<string, unknown>;
+      const saved = mockedEnv.HIBP_API_KEY;
+      mockedEnv.HIBP_API_KEY = undefined;
+      try {
+        let caught: unknown;
+        try {
+          HibpAdapter.create();
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeInstanceOf(HibpNotConfiguredError);
+        expect((caught as HibpNotConfiguredError).code).toBe("HIBP_NOT_CONFIGURED");
+      } finally {
+        mockedEnv.HIBP_API_KEY = saved;
       }
     });
   });

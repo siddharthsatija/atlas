@@ -55,6 +55,28 @@ export interface HibpProviderData {
   breaches: HibpBreachMatch[];
 }
 
+// ── Configuration error ───────────────────────────────────────────────────────
+
+/**
+ * Thrown by `HibpAdapter.create()` when `HIBP_API_KEY` is absent from the
+ * environment (ATL-216).
+ *
+ * HIBP is parked: if the adapter is never instantiated the missing key has no
+ * effect on Atlas startup.  This error fires only when `create()` is explicitly
+ * called without the key configured.
+ */
+export class HibpNotConfiguredError extends Error {
+  readonly code = "HIBP_NOT_CONFIGURED" as const;
+
+  constructor() {
+    super(
+      "HIBP_API_KEY is not configured. " +
+        "Set the environment variable before instantiating HibpAdapter (ATL-216).",
+    );
+    this.name = "HibpNotConfiguredError";
+  }
+}
+
 // ── Adapter constants ─────────────────────────────────────────────────────────
 
 export const HIBP_PROVIDER_CLASS = "discovery_hashed_query" as const;
@@ -118,8 +140,17 @@ export class HibpAdapter implements DiscoveryProviderAdapter {
 
   constructor(private readonly apiKey: string) {}
 
-  /** Production factory: reads `HIBP_API_KEY` from the validated server env. */
+  /**
+   * Production factory: reads `HIBP_API_KEY` from the validated server env.
+   *
+   * Throws `HibpNotConfiguredError` if `HIBP_API_KEY` is absent (ATL-216).
+   * If HIBP is not registered in the provider registry this method is never
+   * called, so the absence of the key has no effect on Atlas startup.
+   */
   static create(): HibpAdapter {
+    if (!env.HIBP_API_KEY) {
+      throw new HibpNotConfiguredError();
+    }
     return new HibpAdapter(env.HIBP_API_KEY);
   }
 

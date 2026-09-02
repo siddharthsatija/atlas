@@ -43,13 +43,20 @@ describe("environment validation", () => {
     "AUDIT_HMAC_KEY",
     "ANTHROPIC_API_KEY",
     "RATE_LIMIT_REDIS_URL",
-    "HIBP_API_KEY",
   ])("fails when required variable %s is missing", (key) => {
     const { [key]: _removed, ...incomplete } = validEnv as Record<string, string>;
     expect(() => buildServerEnv(incomplete)).toThrow(/Invalid environment configuration/);
   });
 
-  it("fails when HIBP_API_KEY is empty", () => {
+  // ATL-216: HIBP is parked — the key is optional at boot.
+  it("succeeds when HIBP_API_KEY is absent (ATL-216)", () => {
+    const { HIBP_API_KEY: _removed, ...withoutHibp } = validEnv as Record<string, string>;
+    expect(() => buildServerEnv(withoutHibp)).not.toThrow();
+  });
+
+  it("fails when HIBP_API_KEY is provided but empty (ATL-216)", () => {
+    // If the variable IS set it must be non-empty (min 1 char); an empty
+    // string is a misconfiguration, not an intentional absence.
     expect(() => buildServerEnv({ ...validEnv, HIBP_API_KEY: "" })).toThrow(
       /Invalid environment configuration/,
     );

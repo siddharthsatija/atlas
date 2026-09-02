@@ -107,15 +107,21 @@ export const serverEnvSchema = z.object({
     )
     .optional(),
 
-  // --- HIBP discovery provider (ATL-207) ------------------------------------
+  // --- HIBP discovery provider (ATL-207, ATL-216) ---------------------------
   /**
    * HIBP Pro API key for the breached-account range endpoint.
    *
-   * Required at boot.  Transmitted as the `hibp-api-key` request header on
-   * Step 1 (range) requests only — never logged, never included in client
-   * bundles, and never sent on Step 2 (catalogue) requests which are public.
+   * Optional at boot (ATL-216): HIBP is parked and must not prevent Atlas
+   * from starting in environments where no key is configured.  When the key
+   * is present it must be non-empty (min 1 char).  Validation at adapter
+   * instantiation time — `HibpAdapter.create()` throws `HibpNotConfiguredError`
+   * if the key is absent when the adapter is explicitly constructed.
+   *
+   * Transmitted as the `hibp-api-key` request header on Step 1 (range)
+   * requests only — never logged, never included in client bundles, and
+   * never sent on Step 2 (catalogue) requests which are public.
    */
-  HIBP_API_KEY: z.string().min(1, "HIBP_API_KEY is required"),
+  HIBP_API_KEY: z.string().min(1).optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
