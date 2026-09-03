@@ -66,12 +66,17 @@ setup("authenticate through the sign-in flow", async ({ page }) => {
   await page.waitForURL(/\/(overview|onboarding)(\?.*)?$/);
 
   if (new URL(page.url()).pathname === "/onboarding") {
-    // Straight through: every question is skippable, which is the shortest path
-    // and also the one that leaves the profile in its default state.
+    // Straight through: every skippable question is skipped, which is the
+    // shortest path and leaves the profile in its default state.
+    // Introduction → Continue
     await page.getByRole("button", { name: "Continue" }).click();
+    // privacy_goal → categories → starting_point: all skippable
     for (let step = 0; step < 3; step++) {
       await page.getByRole("button", { name: "Skip" }).click();
     }
+    // identity_profile (ATL-209): mandatory step, stamps identity_profile_step_completed_at
+    await page.getByRole("button", { name: "Continue" }).click();
+    // ready → dashboard
     await page.getByRole("button", { name: "Go to my dashboard" }).click();
   }
 
