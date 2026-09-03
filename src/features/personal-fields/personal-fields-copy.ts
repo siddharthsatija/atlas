@@ -19,17 +19,6 @@ import { PERSONAL_FIELD_KEYS, type PersonalFieldKey } from "@/lib/personal-field
  * stored field to reach a provider **only** with per-request approval, and that
  * approval step is ATL-058 — it does not exist yet. So the copy says approval is
  * required and never implies the assistant can reach these values today.
- *
- * ## ATL-209 additions
- *
- * `discoveryToggleLabel` and `discoveryToggleHint` are used by `DiscoveryToggle`,
- * which appears both in settings and in the onboarding identity-profile step.
- * Keeping them here rather than inline means both surfaces use identical wording
- * without a cross-feature copy dependency.
- *
- * `failureFieldInUse` is the durable error for the case where `removeField()`
- * returns `FIELD_IN_USE`. The honest copy states what the user should do: wait.
- * It does not suggest deletion will happen automatically — it will not.
  */
 
 export interface PersonalFieldsCopy {
@@ -79,31 +68,6 @@ export interface PersonalFieldsCopy {
   failureInvalid: string;
   failureNotFound: string;
   failureUnavailable: string;
-
-  /**
-   * ATL-209: shown when `removeField()` returns `FIELD_IN_USE`.
-   *
-   * A discovery run holds an active reference to the field. The user should
-   * wait until the run finishes and try again. No deferred deletion happens.
-   */
-  failureFieldInUse: string;
-
-  /**
-   * ATL-209: label for the `include_in_discovery` toggle.
-   *
-   * Used by `DiscoveryToggle` in both settings and onboarding so the text is
-   * identical across surfaces. Short enough to sit beside the switch.
-   */
-  discoveryToggleLabel: string;
-
-  /**
-   * ATL-209: one-line description rendered beneath `discoveryToggleLabel`.
-   *
-   * States honestly what "enabled" means and what Atlas does with the value.
-   * Does not promise any particular outcome — whether a company holds data
-   * about a given email is something Atlas discovers, not guarantees.
-   */
-  discoveryToggleHint: string;
 }
 
 export const PERSONAL_FIELDS_COPY: PersonalFieldsCopy = {
@@ -180,22 +144,6 @@ export const PERSONAL_FIELDS_COPY: PersonalFieldsCopy = {
   failureInvalid: "A label and a value are both needed. Nothing was stored.",
   failureNotFound: "That detail is no longer here. Nothing changed.",
   failureUnavailable: "Atlas could not save that just now. Nothing changed — please try again.",
-
-  /**
-   * ATL-209 — shown when `removeField()` returns `FIELD_IN_USE`.
-   *
-   * The run holds the reference; it will release it when it finishes. The copy
-   * does not say deletion will happen automatically — it will not.
-   */
-  failureFieldInUse:
-    "This field is currently being used by an active discovery run and cannot be deleted right now. Try again after the run finishes.",
-
-  /**
-   * ATL-209 — used by `DiscoveryToggle` in settings and onboarding.
-   */
-  discoveryToggleLabel: "Use for discovery",
-  discoveryToggleHint:
-    "When enabled, Atlas uses this detail when searching for accounts and data associated with you.",
 };
 
 /** Human-readable names for the six §7.13 keys, for the kind selector. */

@@ -101,24 +101,6 @@ export class OnboardingService {
     return this.profiles.saveOnboardingState(userId, parseOnboardingState(state));
   }
 
-  /**
-   * Records that the user has completed the Identity Profile step (ATL-209).
-   *
-   * Called from `completeIdentityProfileStepAction`, which the Continue button
-   * on the identity_profile onboarding step triggers. The write uses first-write
-   * semantics (see `ProfileRepository.markIdentityProfileStepComplete`) so the
-   * timestamp records the first completion, never a later revisit.
-   *
-   * Idempotent from the caller's perspective: a repeat call after the column is
-   * already set does nothing (the guarded update writes 0 rows) and does not
-   * throw. This covers the case where a user presses Continue twice, or where a
-   * tab that had the step open submits after the user completed it elsewhere.
-   */
-  async completeIdentityProfileStep(userId: string): Promise<void> {
-    await this.profiles.ensure(userId);
-    await this.profiles.markIdentityProfileStepComplete(userId);
-  }
-
   async complete(input: CompleteOnboardingInput): Promise<CompleteOnboardingResult> {
     await this.profiles.ensure(input.userId);
 

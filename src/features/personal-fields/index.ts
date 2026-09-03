@@ -5,11 +5,6 @@
  * exported for tests rather than for other features to compose. `index.ts` is the
  * feature's public surface, and the ESLint `no-restricted-imports` rule stops
  * another feature reaching past it into these files.
- *
- * ATL-209 adds `DiscoveryToggle` and `PersonalFieldToggleAction` to the surface.
- * Both are used by the identity-profile onboarding step (in `features/onboarding`)
- * and by the updated settings section — keeping them here means neither surface
- * imports the component from a deep path.
  */
 export { PersonalFieldsSection, type PersonalFieldsSectionProps } from "./personal-fields-section";
 export { PersonalFieldsConsent } from "./personal-fields-consent";
@@ -22,14 +17,6 @@ export {
   PERSONAL_FIELD_KIND_OPTIONS,
   type PersonalFieldsCopy,
 } from "./personal-fields-copy";
-
-/**
- * ATL-209: discovery toggle primitive.
- *
- * Exported here so callers obey the no-restricted-imports boundary — neither
- * the onboarding step nor the settings section reaches into the file directly.
- */
-export { DiscoveryToggle, type DiscoveryToggleProps } from "./discovery-toggle";
 
 /**
  * The view model, exported because the route has to build one.
@@ -47,5 +34,4 @@ export type {
   PersonalFieldFormAction,
   PersonalFieldButtonAction,
   PersonalFieldConsentAction,
-  PersonalFieldToggleAction,
 } from "./personal-fields-view";

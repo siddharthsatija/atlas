@@ -58,30 +58,6 @@ export const ONBOARDING_STEP_COPY = {
     title: "How would you like to begin?",
     lede: "Either way, you are in control of what gets added.",
   },
-  /**
-   * ATL-209: Identity Profile step.
-   *
-   * Copy for the step where users add contact details Atlas can use for discovery
-   * (e.g. email addresses). The "soft gate" warning below is shown when the user
-   * has no email with include_in_discovery = true — but Continue is always
-   * available regardless.
-   */
-  identity_profile: {
-    title: "Your identity details",
-    lede: "Add the contact details Atlas can use to search for data about you. You decide which ones to include in discovery, and you can change them any time in Settings.",
-    softGateWarning:
-      "No email address is set up for discovery. Atlas can still search using other details, but an email address is the most effective starting point.",
-    consentPreamble:
-      "Before saving your details, Atlas needs your permission. Every field is optional and can be removed at any time.",
-    noFieldsYet: "No details saved yet.",
-    addFieldTitle: "Add a detail",
-    addSubmit: "Save detail",
-    discoveryToggleLabel: "Use for discovery",
-    discoveryToggleHint:
-      "When enabled, Atlas uses this detail when searching for accounts and data associated with you.",
-    fieldInUseError:
-      "This field is currently being used by an active discovery run and cannot be deleted right now. Try again after the run finishes.",
-  },
   ready: {
     title: "You are set up",
     lede: "Your dashboard is empty until you add something, which is the honest starting point.",

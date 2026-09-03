@@ -78,14 +78,12 @@ const field = (overrides: Partial<PersonalFieldView> = {}): PersonalFieldView =>
   label: "Personal Gmail",
   maskedValue: MASKED,
   lastUsedAt: null,
-  includeInDiscovery: false,
   ...overrides,
 });
 
 function section(props: Partial<React.ComponentProps<typeof PersonalFieldsSection>> = {}) {
   const noopForm = vi.fn().mockResolvedValue(INITIAL_FORM_VIEW_STATE);
   const noopButton = vi.fn().mockResolvedValue(INITIAL_ACTION_VIEW_STATE);
-  const noopToggle = vi.fn().mockResolvedValue({ ok: true });
 
   return render(
     <PersonalFieldsSection
@@ -94,7 +92,6 @@ function section(props: Partial<React.ComponentProps<typeof PersonalFieldsSectio
       addAction={noopForm}
       editAction={noopForm}
       deleteAction={noopButton}
-      setDiscoveryAction={noopToggle}
       {...props}
     />,
   );

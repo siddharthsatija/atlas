@@ -41,7 +41,7 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   const user = await requireVerifiedUser();
 
   /**
-   * Onboarding gate (ATL-016, ATL-209).
+   * Onboarding gate (ATL-016).
    *
    * A user who has not finished setup is sent to `/onboarding` rather than shown
    * an empty dashboard with no explanation of what Atlas does or does not do.
@@ -50,21 +50,12 @@ export default async function ProductLayout({ children }: { children: ReactNode 
    * load until it completes", and it is partial so completed profiles, the
    * eventual majority, never pay for it.
    *
-   * ATL-209 adds a second marker: `identity_profile_step_completed_at`. Pre-M13
-   * users completed onboarding before this step existed, so their
-   * `onboarding_completed_at` is set but this column is null. Both must be set
-   * for the gate to pass — the `/onboarding` route handles upgrade mode for the
-   * subset who have `onboarding_completed_at` but lack the newer marker.
-   *
    * Placed immediately after the session check and before any product data is
    * read, for the same reason the session check is first: a gate that later data
    * fetching can drift above is not a gate.
    */
   const profile = await OnboardingService.create().start(user.id);
-
-  if (profile.onboardingCompletedAt === null || profile.identityProfileStepCompletedAt === null) {
-    redirect("/onboarding");
-  }
+  if (profile.onboardingCompletedAt === null) redirect("/onboarding");
 
   const store = await cookies();
   const sidebarCollapsed = parseSidebarCollapsed(store.get(SIDEBAR_COLLAPSED_COOKIE)?.value);

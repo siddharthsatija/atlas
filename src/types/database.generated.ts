@@ -993,7 +993,6 @@ export type Database = {
           demo_data_enabled: boolean
           display_name: string | null
           id: string
-          identity_profile_step_completed_at: string | null
           locale: string
           onboarding_completed_at: string | null
           onboarding_state_json: Json
@@ -1007,7 +1006,6 @@ export type Database = {
           demo_data_enabled?: boolean
           display_name?: string | null
           id: string
-          identity_profile_step_completed_at?: string | null
           locale?: string
           onboarding_completed_at?: string | null
           onboarding_state_json?: Json
@@ -1021,7 +1019,6 @@ export type Database = {
           demo_data_enabled?: boolean
           display_name?: string | null
           id?: string
-          identity_profile_step_completed_at?: string | null
           locale?: string
           onboarding_completed_at?: string | null
           onboarding_state_json?: Json

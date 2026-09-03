@@ -31,7 +31,6 @@ const FIELD = "44444444-4444-4444-8444-444444444444";
 const save = vi.fn();
 const edit = vi.fn();
 const remove = vi.fn();
-const removeField = vi.fn();
 const reveal = vi.fn();
 const grant = vi.fn();
 /** Typed, so `mock.calls` yields `string` rather than `any` when read below. */
@@ -48,7 +47,7 @@ vi.mock("@/server/auth/require-user", () => ({
 }));
 
 vi.mock("@/server/personal-fields/personal-field-service", () => ({
-  PersonalFieldService: { create: () => ({ save, edit, remove, removeField, reveal }) },
+  PersonalFieldService: { create: () => ({ save, edit, remove, reveal }) },
 }));
 
 vi.mock("@/server/consent/consent-service", () => ({
@@ -76,7 +75,6 @@ beforeEach(() => {
   save.mockResolvedValue({ ok: true, data: { id: FIELD } });
   edit.mockResolvedValue({ ok: true, data: { id: FIELD } });
   remove.mockResolvedValue({ ok: true, data: null });
-  removeField.mockResolvedValue({ ok: true, data: null });
   reveal.mockResolvedValue({ ok: true, data: "alex@example.com" });
   grant.mockResolvedValue(undefined);
 });
@@ -232,7 +230,7 @@ describe("deleting a field", () => {
   it("removes the field the form named", async () => {
     const state = await deletePersonalFieldAction(INITIAL_ACTION_STATE, form({ fieldId: FIELD }));
 
-    expect(removeField).toHaveBeenCalledWith(USER, FIELD);
+    expect(remove).toHaveBeenCalledWith(USER, FIELD);
     expect(state).toEqual({ failure: null, attempt: 1 });
   });
 
@@ -246,7 +244,7 @@ describe("deleting a field", () => {
     const state = await deletePersonalFieldAction(INITIAL_ACTION_STATE, form({ fieldId: FIELD }));
 
     expect(state.failure).toBeNull();
-    expect(removeField).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -309,7 +307,7 @@ describe("what a write invalidates", () => {
     [
       "a delete",
       () => deletePersonalFieldAction(INITIAL_ACTION_STATE, form({ fieldId: FIELD })),
-      removeField,
+      remove,
     ],
   ])("invalidates only /settings after %s", async (_label, run) => {
     await run();
@@ -331,7 +329,7 @@ describe("what a write invalidates", () => {
     [
       "a failed delete",
       () => deletePersonalFieldAction(INITIAL_ACTION_STATE, form({ fieldId: FIELD })),
-      removeField,
+      remove,
     ],
   ])("invalidates nothing after %s", async (_label, run, mocked) => {
     mocked.mockResolvedValue({ ok: false, code: "UNAVAILABLE" });
@@ -363,7 +361,7 @@ describe("identity and input", () => {
       "a delete",
       () =>
         deletePersonalFieldAction(INITIAL_ACTION_STATE, form({ fieldId: FIELD, userId: OTHER })),
-      removeField,
+      remove,
     ],
     [
       "an edit",
@@ -386,7 +384,7 @@ describe("identity and input", () => {
      * `[object File]` — a plausible-looking id or value. The `text` helper drops
      * anything that is not a string.
      */
-    removeField.mockResolvedValue({ ok: false, code: "NOT_FOUND" });
+    remove.mockResolvedValue({ ok: false, code: "NOT_FOUND" });
 
     const data = new FormData();
     data.append("fieldId", new File([], "not-an-id.txt"));
@@ -395,7 +393,7 @@ describe("identity and input", () => {
       failure: "not_found",
       attempt: 1,
     });
-    expect(removeField).toHaveBeenCalledWith(USER, "");
+    expect(remove).toHaveBeenCalledWith(USER, "");
   });
 });
 

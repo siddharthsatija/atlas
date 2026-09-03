@@ -13,20 +13,12 @@
  * index would silently mean something different the moment a step is inserted.
  */
 
-/**
- * Frontend §17, in order.
- *
- * `identity_profile` (ATL-209) sits between `starting_point` and `ready`.
- * It is mandatory — it must NOT be added to `SKIPPABLE_STEPS`. Pre-M13 users
- * who already completed onboarding are also routed to it as a one-step upgrade
- * (they only see `identity_profile`, not the preceding steps).
- */
+/** Frontend §17, in order. */
 export const ONBOARDING_STEPS = [
   "introduction",
   "privacy_goal",
   "categories",
   "starting_point",
-  "identity_profile",
   "ready",
 ] as const;
 

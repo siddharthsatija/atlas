@@ -12,22 +12,8 @@ import { OnboardingFlow } from "./onboarding-flow";
  * The full journey is `tests/e2e/onboarding.spec.ts`.
  */
 
-vi.mock("server-only", () => ({}));
-vi.mock("@/server/db/service-role-client", () => ({ createServiceRoleClient: () => ({}) }));
-vi.mock("@/config/env", () => ({
-  env: { AUDIT_HMAC_KEY: Buffer.alloc(32, 9).toString("base64") },
-}));
-
 vi.mock("./actions", () => ({
   completeOnboardingAction: vi.fn(),
-}));
-
-vi.mock("./identity-profile-actions", () => ({
-  grantStorageConsentForOnboardingAction: vi.fn(),
-  saveOnboardingFieldAction: vi.fn(),
-  setOnboardingFieldDiscoveryAction: vi.fn(),
-  removeOnboardingFieldAction: vi.fn(),
-  completeIdentityProfileStepAction: vi.fn(),
 }));
 
 const midway: OnboardingState = {
@@ -44,7 +30,7 @@ describe("resuming", () => {
     render(<OnboardingFlow initialState={midway} />);
 
     expect(heading("Where do you have accounts?")).toBeInTheDocument();
-    expect(await screen.findByText("Step 3 of 6")).toBeInTheDocument();
+    expect(await screen.findByText("Step 3 of 5")).toBeInTheDocument();
   });
 
   it("restores the choices made before leaving", () => {
@@ -157,9 +143,6 @@ describe("consent is never resumed", () => {
       />,
     );
 
-    // starting_point → identity_profile
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    // identity_profile → ready (where the AI-consent checkbox lives)
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(screen.getByRole("checkbox", { name: /Let Atlas use AI/ })).not.toBeChecked();

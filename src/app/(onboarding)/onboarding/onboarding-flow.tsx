@@ -19,17 +19,8 @@ import {
   ONBOARDING_LIMITATIONS,
   ONBOARDING_STEP_COPY,
   OnboardingProgress,
-  IdentityProfileStep,
-  type IdentityProfileFieldView,
 } from "@/features/onboarding";
 import { completeOnboardingAction } from "./actions";
-import {
-  grantStorageConsentForOnboardingAction,
-  saveOnboardingFieldAction,
-  setOnboardingFieldDiscoveryAction,
-  removeOnboardingFieldAction,
-  completeIdentityProfileStepAction,
-} from "./identity-profile-actions";
 import { INITIAL_COMPLETE_STATE } from "./form-state";
 import { cn } from "@/lib/utils";
 
@@ -53,19 +44,11 @@ import { cn } from "@/lib/utils";
  * see `onboarding-state.ts` for why restoring a ticked consent box would be
  * worse than asking again.
  *
- * ## Nothing sensitive is collected (except in identity_profile)
+ * ## Nothing sensitive is collected
  *
- * Every input on steps 1–4 is a choice from a fixed set. The identity_profile
- * step (ATL-209) collects contact details — email, name, phone, address. Those
- * are handled by `IdentityProfileStep`, which manages its own field state and
- * interacts with dedicated server actions isolated from `settings/actions.ts`.
- *
- * ## Upgrade mode (ATL-209)
- *
- * Pre-M13 users who completed onboarding before `identity_profile` existed are
- * sent here with `isUpgradeMode = true`. They see only the identity_profile step.
- * The flow starts there, hides the progress indicator and outer navigation, and
- * `completeIdentityProfileStepAction(true)` redirects to `/overview` on success.
+ * Every input is a choice from a fixed set. There is no text field anywhere in
+ * this flow, which is the structural version of the acceptance criterion "no
+ * sensitive fields requested" — there is nowhere to type a name.
  */
 
 interface Answers {
@@ -92,45 +75,12 @@ export interface OnboardingFlowProps {
    * survive a refresh.
    */
   onStateChange?: (state: OnboardingState) => void | Promise<void>;
-
-  // ---- ATL-209: identity profile step props --------------------------------
-
-  /**
-   * Whether the user has granted `personal_fields_storage` consent.
-   *
-   * Resolved server-side by the page so the consent panel or the add form
-   * renders on the first paint without a loading state.
-   */
-  isStoragePermitted?: boolean;
-  /**
-   * The user's current identity-profile fields, loaded by the page.
-   *
-   * Empty for first-time visitors; may contain existing fields for returning
-   * users who navigated back to this step.
-   */
-  identityProfileFields?: IdentityProfileFieldView[];
-  /**
-   * True for pre-M13 users who completed onboarding before this step existed.
-   *
-   * When true, the flow starts at `identity_profile`, hides the progress
-   * indicator and outer navigation, and the complete action redirects to
-   * `/overview` rather than advancing to `ready`.
-   */
-  isUpgradeMode?: boolean;
 }
 
-export function OnboardingFlow({
-  initialState,
-  onStateChange,
-  isStoragePermitted = false,
-  identityProfileFields = [],
-  isUpgradeMode = false,
-}: OnboardingFlowProps = {}) {
+export function OnboardingFlow({ initialState, onStateChange }: OnboardingFlowProps = {}) {
   const resumed = initialState ?? INITIAL_ONBOARDING_STATE;
 
-  const [step, setStep] = useState<OnboardingStep>(
-    isUpgradeMode ? "identity_profile" : resumed.step,
-  );
+  const [step, setStep] = useState<OnboardingStep>(resumed.step);
   const [answers, setAnswers] = useState<Answers>({
     privacyGoal: resumed.privacyGoal,
     categories: resumed.categories,
@@ -195,11 +145,7 @@ export function OnboardingFlow({
 
   return (
     <div>
-      {/*
-        Upgrade-mode users see only the identity_profile step and no progress
-        bar — showing step 5 of 6 for a one-step flow would confuse them.
-      */}
-      {!isUpgradeMode && <OnboardingProgress step={step} />}
+      <OnboardingProgress step={step} />
 
       <Card>
         {step === "introduction" && <IntroductionStep />}
@@ -234,35 +180,6 @@ export function OnboardingFlow({
             onSelect={(id) => answer({ startingPoint: id })}
           />
         )}
-
-        {/*
-          ATL-209: identity profile step.
-
-          The flow imports the server actions directly (it is in `app/`) and
-          passes them as props to the feature component, which is in `features/`
-          and cannot import from `app/`. This keeps the dependency edge
-          app/ → features/ and never the reverse.
-
-          The step manages its own Continue button and calls completeAction
-          which either redirects (upgrade mode) or returns so onAdvance fires.
-          The outer navigation is therefore hidden for this step.
-        */}
-        {step === "identity_profile" && (
-          <CardContent>
-            <IdentityProfileStep
-              isStoragePermitted={isStoragePermitted}
-              initialFields={identityProfileFields}
-              isUpgradeMode={isUpgradeMode}
-              grantConsentAction={grantStorageConsentForOnboardingAction}
-              addFieldAction={saveOnboardingFieldAction}
-              setDiscoveryAction={setOnboardingFieldDiscoveryAction}
-              removeFieldAction={removeOnboardingFieldAction}
-              completeAction={completeIdentityProfileStepAction}
-              onAdvance={advance}
-            />
-          </CardContent>
-        )}
-
         {step === "ready" && (
           <ReadyStep
             answers={answers}
@@ -274,17 +191,9 @@ export function OnboardingFlow({
         )}
       </Card>
 
-      {/*
-        Outer navigation.
-
-        Hidden for `ready` (the form provides its own submit).
-        Hidden for `identity_profile` (IdentityProfileStep provides Continue).
-
-        For `identity_profile` in the full flow (not upgrade mode), a Back
-        button is still shown so the user can revisit `starting_point`.
-        In upgrade mode, there is nothing to go back to.
-      */}
-      {step !== "ready" && step !== "identity_profile" && (
+      {/* Navigation sits outside the card so it reads as chrome for the flow
+          rather than as part of the question being asked. */}
+      {step !== "ready" && (
         <div className="mt-6 flex items-center justify-between gap-3">
           <div>
             {back && (
@@ -302,14 +211,6 @@ export function OnboardingFlow({
             )}
             <Button onClick={advance}>Continue</Button>
           </div>
-        </div>
-      )}
-
-      {step === "identity_profile" && !isUpgradeMode && back && (
-        <div className="mt-6 flex items-center justify-start gap-3">
-          <Button variant="tertiary" onClick={() => goToStep(back)}>
-            Back
-          </Button>
         </div>
       )}
     </div>

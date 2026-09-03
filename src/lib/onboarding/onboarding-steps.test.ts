@@ -28,7 +28,6 @@ describe("step order", () => {
       "privacy_goal",
       "categories",
       "starting_point",
-      "identity_profile",
       "ready",
     ]);
   });
@@ -70,14 +69,11 @@ describe("skipping", () => {
     expect(isSkippable("ready")).toBe(false);
   });
 
-  it("preference-collection steps are all skippable; identity_profile is not", () => {
-    // ATL-209: identity_profile is mandatory and must NOT appear in SKIPPABLE_STEPS.
-    // Preference steps (privacy_goal, categories, starting_point) remain optional.
-    const preferenceSteps = ONBOARDING_STEPS.filter(
-      (step) => step !== "introduction" && step !== "identity_profile" && step !== "ready",
+  it("lets a user reach completion without answering anything", () => {
+    const answerable = ONBOARDING_STEPS.filter(
+      (step) => step !== "introduction" && step !== "ready",
     );
-    expect(preferenceSteps.every(isSkippable)).toBe(true);
-    expect(isSkippable("identity_profile")).toBe(false);
+    expect(answerable.every(isSkippable)).toBe(true);
   });
 });
 

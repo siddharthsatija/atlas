@@ -13,7 +13,7 @@ import {
 } from "./form-state";
 
 /**
- * Server Actions for Settings → Personal data (ATL-106, ATL-209).
+ * Server Actions for Settings → Personal data (ATL-106).
  *
  * A thin layer over ATL-105, deliberately. Nothing here masks, encrypts, audits,
  * checks consent or decides permission — `PersonalFieldService` owns all five, and
@@ -33,17 +33,6 @@ import {
  * it, because consent is a user action rather than a side effect of persistence.
  * `grantPersonalFieldsConsentAction` is that user action: it is reachable only
  * from a submitted button, and it calls the one service that owns consent records.
- *
- * ## ATL-209: discovery toggle and field-in-use deletion guard
- *
- * `setIncludeInDiscoveryAction` is a direct-call server action (not useActionState)
- * matching the `PersonalFieldToggleAction` contract from `features/personal-fields`.
- * It calls `PersonalFieldService.setIncludeInDiscovery`, which audits the change.
- *
- * `deletePersonalFieldAction` now calls `removeField()` instead of `remove()`.
- * `removeField()` blocks when an in-progress discovery invocation holds a reference
- * to the field, returning `FIELD_IN_USE`. The settings UI surfaces this as the
- * `field_in_use` failure so the person knows to wait for the run to finish.
  */
 
 /** Reads one field as text. A `File` stringifies to `[object File]`, so reject it. */
@@ -52,12 +41,11 @@ function text(formData: FormData, name: string): string {
   return typeof value === "string" ? value : "";
 }
 
-/** The service's codes, narrowed to the five these flows can surface. */
+/** The service's codes, narrowed to the four these flows can surface. */
 function toFailure(code: ApiErrorCode): PersonalFieldFailure {
   if (code === "CONSENT_REQUIRED") return "consent_required";
   if (code === "INVALID_REQUEST") return "invalid";
   if (code === "NOT_FOUND") return "not_found";
-  if (code === "FIELD_IN_USE") return "field_in_use";
   return "unavailable";
 }
 
@@ -169,13 +157,7 @@ export async function editPersonalFieldAction(
 }
 
 /**
- * Hard-deletes one field, blocking when a discovery run is using it (ATL-209).
- *
- * **Uses `removeField()`, not `remove()`.**  `removeField()` checks whether an
- * in-progress discovery invocation holds a reference to this field before
- * attempting the delete; if one does, it returns `FIELD_IN_USE` and nothing is
- * deleted. `remove()` has no such check and is reserved for contexts that do not
- * expose a discovery-aware UI (the old settings surface pre-ATL-209 used it).
+ * Hard-deletes one field.
  *
  * **Not consent-gated**, matching the service: deletion is the safe direction, and
  * a gate would stop someone removing the very values their withdrawal was about
@@ -188,10 +170,7 @@ export async function deletePersonalFieldAction(
   const user = await requireVerifiedUser();
   const attempt = previous.attempt + 1;
 
-  const result = await PersonalFieldService.create().removeField(
-    user.id,
-    text(formData, "fieldId"),
-  );
+  const result = await PersonalFieldService.create().remove(user.id, text(formData, "fieldId"));
 
   if (!result.ok) return { failure: toFailure(result.code), attempt };
 
@@ -226,38 +205,4 @@ export async function revealPersonalFieldAction(
   if (!result.ok) return { ok: false, value: null };
 
   return { ok: true, value: result.data };
-}
-
-/**
- * Toggles `include_in_discovery` on one field (ATL-209).
- *
- * Direct-call server action matching `PersonalFieldToggleAction` from
- * `features/personal-fields`. Does **not** use `useActionState` — the toggle is
- * an optimistic control (`DiscoveryToggle`) that manages its own UI state and
- * needs a typed return value rather than a form-shaped state object.
- *
- * Not consent-gated: `include_in_discovery` is a preference about the *use* of
- * an already-stored field, not new storage. The full rationale is in
- * `PersonalFieldService.setIncludeInDiscovery`.
- *
- * Failures return `{ ok: false }`. The toggle uses `useOptimistic` and silently
- * reverts on failure — no error message is surfaced (the user retries by toggling
- * again). A structured code would give the UI nowhere to put it.
- */
-export async function setIncludeInDiscoveryAction(
-  fieldId: string,
-  enabled: boolean,
-): Promise<{ ok: boolean }> {
-  const user = await requireVerifiedUser();
-
-  const result = await PersonalFieldService.create().setIncludeInDiscovery(
-    user.id,
-    fieldId,
-    enabled,
-  );
-
-  if (!result.ok) return { ok: false };
-
-  revalidateSettings();
-  return { ok: true };
 }

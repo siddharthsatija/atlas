@@ -56,7 +56,6 @@ export interface PersonalFieldFormProps {
 
 const FAILURE_COPY: Record<NonNullable<PersonalFieldFormViewState["failure"]>, string> = {
   consent_required: PERSONAL_FIELDS_COPY.failureConsentRequired,
-  field_in_use: PERSONAL_FIELDS_COPY.failureFieldInUse,
   invalid: PERSONAL_FIELDS_COPY.failureInvalid,
   not_found: PERSONAL_FIELDS_COPY.failureNotFound,
   unavailable: PERSONAL_FIELDS_COPY.failureUnavailable,
