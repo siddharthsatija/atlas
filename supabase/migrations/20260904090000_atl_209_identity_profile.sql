@@ -13,4 +13,4 @@
 alter table public.profiles
 add column identity_profile_step_completed_at timestamptz;
 
-comment on column public.profiles.identity_profile_step_completed_at is 'Stamped once when the user completes the Identity Profile onboarding step (ATL-209). NULL means the step has not been completed. First-write semantics: never overwritten.';
+comment on column public.profiles.identity_profile_step_completed_at is 'Stamped once when the user completes the Identity Profile onboarding step (ATL-209). ' 'NULL means the step has not been completed. First-write semantics: never overwritten.';
