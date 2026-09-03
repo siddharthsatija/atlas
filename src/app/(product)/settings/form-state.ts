@@ -9,7 +9,7 @@ import type { PersonalFieldKey } from "@/lib/personal-fields";
  *
  * ## The failure vocabulary is the service's, narrowed
  *
- * `PersonalFieldService` answers with an `ApiErrorCode`. Four of those can reach
+ * `PersonalFieldService` answers with an `ApiErrorCode`. Five of those can reach
  * these flows and each needs different words:
  *
  *   - `consent_required` — `personal_fields_storage` is absent or withdrawn.
@@ -21,8 +21,13 @@ import type { PersonalFieldKey } from "@/lib/personal-fields";
  *   - `not_found` — no such field, or not this person's. Indistinguishable by
  *     design, the non-oracle rule the service applies everywhere.
  *   - `unavailable` — the write failed. Nothing changed.
+ *   - `field_in_use` — ATL-209. An in-progress discovery invocation holds a
+ *     reference to this field; deletion is blocked until the run finishes.
+ *     Recoverable: `removeField()` performs a live check, so retrying after the
+ *     run completes succeeds.
  */
-export type PersonalFieldFailure = "consent_required" | "invalid" | "not_found" | "unavailable";
+export type PersonalFieldFailure =
+  "consent_required" | "invalid" | "not_found" | "unavailable" | "field_in_use";
 
 export interface PersonalFieldFormState {
   failure: PersonalFieldFailure | null;

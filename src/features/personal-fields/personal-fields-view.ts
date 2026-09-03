@@ -22,6 +22,9 @@ import type { PersonalFieldKey } from "@/lib/personal-fields";
  * Carries `maskedValue` and **no plaintext**. The full value reaches the browser
  * only as the resolved return of the reveal action, which audits before it
  * answers — see `personal-field-value.tsx`.
+ *
+ * ATL-209 adds `includeInDiscovery` so the discovery toggle reflects the
+ * persisted state without a separate query.
  */
 export interface PersonalFieldView {
   id: string;
@@ -31,10 +34,26 @@ export interface PersonalFieldView {
   maskedValue: string;
   /** Null until ATL-058 gives `markUsed` its first production caller. */
   lastUsedAt: string | null;
+  /**
+   * ATL-209: whether this field is included in discovery runs.
+   *
+   * Toggled via `setIncludeInDiscoveryAction` (settings) or
+   * `setOnboardingFieldDiscoveryAction` (onboarding). The `DiscoveryToggle`
+   * component reads this as its initial state and then manages optimistic
+   * updates locally.
+   */
+  includeInDiscovery: boolean;
 }
 
-/** The four failures these flows can surface. Mirrors the route's union. */
-export type PersonalFieldViewFailure = "consent_required" | "invalid" | "not_found" | "unavailable";
+/**
+ * The five failures these flows can surface.
+ *
+ * ATL-209 adds `field_in_use`: `removeField()` returns this when a discovery
+ * run holds a live reference to the field. The correct response is to wait
+ * until the run finishes — there is no deferred deletion.
+ */
+export type PersonalFieldViewFailure =
+  "consent_required" | "invalid" | "not_found" | "unavailable" | "field_in_use";
 
 /** Mirrors the route's `PersonalFieldFormState`. */
 export interface PersonalFieldFormViewState {
@@ -76,3 +95,17 @@ export type PersonalFieldButtonAction = (
 export type PersonalFieldConsentAction = (
   previous: PersonalFieldActionViewState,
 ) => PersonalFieldActionViewState | Promise<PersonalFieldActionViewState>;
+
+/**
+ * ATL-209: direct-call action for toggling `include_in_discovery`.
+ *
+ * Direct call rather than formData, because the caller supplies the new state
+ * as a typed boolean — no serialisation and no hidden input. The `DiscoveryToggle`
+ * component passes `fieldId` and `enabled` as positional arguments, which matches
+ * both `setIncludeInDiscoveryAction` (settings) and
+ * `setOnboardingFieldDiscoveryAction` (onboarding).
+ */
+export type PersonalFieldToggleAction = (
+  fieldId: string,
+  enabled: boolean,
+) => Promise<{ ok: boolean }>;

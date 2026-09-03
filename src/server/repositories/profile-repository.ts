@@ -37,6 +37,14 @@ export interface ProfileRecord {
    * usable flow instead of breaking every read of the profile.
    */
   onboardingState: OnboardingState;
+  /**
+   * When the Identity Profile onboarding step was completed (ATL-209).
+   *
+   * Null for any user who has not yet seen or completed the step. Written once
+   * with first-write semantics — never overwritten. Pre-M13 users have
+   * onboardingCompletedAt set but this field null until they complete the upgrade.
+   */
+  identityProfileStepCompletedAt: string | null;
 }
 
 function toRecord(row: ProfileRow): ProfileRecord {
@@ -48,6 +56,7 @@ function toRecord(row: ProfileRow): ProfileRecord {
     demoDataEnabled: row.demo_data_enabled,
     onboardingCompletedAt: row.onboarding_completed_at,
     onboardingState: parseOnboardingState(row.onboarding_state_json),
+    identityProfileStepCompletedAt: row.identity_profile_step_completed_at,
   };
 }
 
@@ -140,6 +149,27 @@ export class ProfileRepository {
 
     if (error) throw new ProfileStoreError();
     return (data ?? []).length > 0;
+  }
+
+  /**
+   * Stamps identity_profile_step_completed_at once (ATL-209).
+   *
+   * First-write semantics: the update is guarded on `IS NULL` so a repeat
+   * submission or a concurrent request from a second tab can never move the
+   * timestamp forward. The column records when the step was *first* completed,
+   * not the most recent visit.
+   *
+   * Throws `ProfileStoreError` on any database error. Callers treat a thrown
+   * error as a write failure and surface it as "unavailable".
+   */
+  async markIdentityProfileStepComplete(userId: string): Promise<void> {
+    const { error } = await this.db
+      .from("profiles")
+      .update({ identity_profile_step_completed_at: new Date().toISOString() })
+      .eq("id", userId)
+      .is("identity_profile_step_completed_at", null);
+
+    if (error) throw new ProfileStoreError();
   }
 
   /**

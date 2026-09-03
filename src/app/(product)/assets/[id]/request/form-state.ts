@@ -49,7 +49,7 @@ export const INITIAL_REQUEST_REVIEW_STATE: RequestReviewFormState = {
  * records consent exactly as saving one in Settings does (ADR-002, FR-13).
  */
 export interface FieldCaptureFormState {
-  failure: "consent_required" | "invalid" | "not_found" | "unavailable" | null;
+  failure: "consent_required" | "field_in_use" | "invalid" | "not_found" | "unavailable" | null;
   label: string | null;
   fieldKey: PersonalFieldKey | null;
   saved?: boolean;
