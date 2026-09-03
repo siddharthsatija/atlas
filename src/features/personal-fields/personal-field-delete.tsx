@@ -15,7 +15,7 @@ import { PERSONAL_FIELDS_COPY } from "./personal-fields-copy";
 import { INITIAL_ACTION_VIEW_STATE, type PersonalFieldButtonAction } from "./personal-fields-view";
 
 /**
- * Deleting one personal detail, with explicit confirmation (ATL-106).
+ * Deleting one personal detail, with explicit confirmation (ATL-106, ATL-209).
  *
  * The acceptance criterion asks for "explicit language", and CLAUDE.md requires
  * every destructive action to use explicit confirmation. So the dialog names the
@@ -28,10 +28,18 @@ import { INITIAL_ACTION_VIEW_STATE, type PersonalFieldButtonAction } from "./per
  *
  * ## Deletion is not consent-gated, and that is deliberate
  *
- * `PersonalFieldService.remove` accepts a delete after consent is withdrawn.
+ * `PersonalFieldService.removeField` accepts a delete after consent is withdrawn.
  * Gating it would stop someone removing the very values their withdrawal was
  * about (ADR-002, security §14), so this control stays enabled in the withdrawn
  * state while add and edit do not.
+ *
+ * ## field_in_use (ATL-209)
+ *
+ * `deletePersonalFieldAction` now calls `removeField()`, which blocks when an
+ * in-progress discovery run holds a reference to the field. On `field_in_use`,
+ * the dialog stays open and shows a durable error message telling the person to
+ * wait for the run to finish before retrying. The dialog is not auto-closed —
+ * a disappearing error message would look like success.
  *
  * ## Danger styling is rare, and this earns it
  *
@@ -96,9 +104,11 @@ export function PersonalFieldDelete({ fieldId, label, action }: PersonalFieldDel
             data-slot="personal-field-delete-error"
             className="rounded-control bg-danger/10 p-3 text-body-sm text-danger"
           >
-            {state.failure === "not_found"
-              ? PERSONAL_FIELDS_COPY.failureNotFound
-              : PERSONAL_FIELDS_COPY.failureUnavailable}
+            {state.failure === "field_in_use"
+              ? PERSONAL_FIELDS_COPY.failureFieldInUse
+              : state.failure === "not_found"
+                ? PERSONAL_FIELDS_COPY.failureNotFound
+                : PERSONAL_FIELDS_COPY.failureUnavailable}
           </p>
         )}
       </DialogContent>

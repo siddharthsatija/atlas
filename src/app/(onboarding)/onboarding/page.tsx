@@ -2,21 +2,40 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { requireVerifiedUser } from "@/server/auth/require-user";
 import { OnboardingService } from "@/server/onboarding/onboarding-service";
+import { PersonalFieldService } from "@/server/personal-fields/personal-field-service";
 import { OnboardingFlow } from "./onboarding-flow";
 import { saveOnboardingProgressAction } from "./actions";
 
 /**
- * Onboarding (ATL-016, frontend §17, PRD §9.1).
+ * Onboarding (ATL-016, ATL-209, frontend §17, PRD §9.1).
  *
- * A Server Component that resolves one question before rendering: has this user
- * already finished? Someone who navigates back to `/onboarding` after completing
- * it is sent to the dashboard rather than shown the flow again — otherwise
- * finishing a second time would overwrite their earlier answers, and the
- * completion timestamp would drift later on every visit.
+ * A Server Component that resolves questions before rendering:
  *
- * The profile row is created here on first arrival. A user authenticated by
- * ATL-011 has an `auth.users` row but not necessarily a profile, and this is the
- * first surface that needs one.
+ * 1. **Has this user finished everything?** `onboardingCompletedAt` is set AND
+ *    `identityProfileStepCompletedAt` is set → redirect to `/overview`. Both
+ *    must be set: ATL-209 added the second marker so pre-M13 users who completed
+ *    the old flow still see the identity-profile step before they reach the product.
+ *
+ * 2. **Is this an upgrade-mode user?** `onboardingCompletedAt` is set but
+ *    `identityProfileStepCompletedAt` is null → the user completed onboarding
+ *    before ATL-209 landed. They see only the identity-profile step. On
+ *    completion, `completeIdentityProfileStepAction(true)` redirects them to
+ *    `/overview`.
+ *
+ * 3. **New user** — neither marker is set. The full onboarding flow runs,
+ *    including the identity-profile step in its position between `starting_point`
+ *    and `ready`.
+ *
+ * ## Identity profile data
+ *
+ * The identity-profile step needs the user's current fields and their storage
+ * consent state, both resolved server-side so the correct panel renders on the
+ * first paint. A returning user who navigated back after saving a field would
+ * otherwise see the "no fields yet" state until client-side fetching completes.
+ *
+ * The profile row is created here on first arrival (via `OnboardingService.start`).
+ * A user authenticated by ATL-011 has an `auth.users` row but not necessarily a
+ * profile.
  */
 
 export const metadata: Metadata = { title: "Set up Atlas" };
@@ -28,23 +47,65 @@ export default async function OnboardingPage() {
   const user = await requireVerifiedUser();
   const profile = await OnboardingService.create().start(user.id);
 
-  if (profile.onboardingCompletedAt !== null) redirect("/overview");
+  /**
+   * ATL-209 completion gate.
+   *
+   * Both markers must be set to consider the user fully past onboarding. A
+   * pre-M13 user who completed `onboarding_completed_at` but not
+   * `identity_profile_step_completed_at` falls through to the upgrade-mode branch
+   * below, not this redirect.
+   */
+  if (profile.onboardingCompletedAt !== null && profile.identityProfileStepCompletedAt !== null) {
+    redirect("/overview");
+  }
 
   /**
-   * Saved progress is resolved here, on the server (ATL-017).
+   * ATL-209 upgrade mode.
    *
-   * The flow therefore renders at the resumed step on the first paint. Fetching
-   * it after mount would show the introduction and then jump, which reads as the
-   * product losing the user's place and then finding it again.
-   *
-   * `profile.onboardingState` is already parsed by the repository, so a corrupt
-   * row arrives here as a usable state rather than as a value this page has to
-   * defend against.
+   * Pre-M13 users land here with `onboardingCompletedAt` set but
+   * `identityProfileStepCompletedAt` null. They see only the identity-profile
+   * step; the rest of the flow is bypassed entirely.
    */
+  const isUpgradeMode =
+    profile.onboardingCompletedAt !== null && profile.identityProfileStepCompletedAt === null;
+
+  /**
+   * Load identity-profile data.
+   *
+   * Resolved on every visit — the step renders on the first paint without a
+   * loading state, and a returning user who already saved some fields sees them
+   * immediately rather than seeing the empty state and then a flash of content.
+   *
+   * If `listMasked` fails (storage error), the step starts empty. The user can
+   * still add fields; the missing ones will reappear on the next page visit.
+   */
+  const pf = PersonalFieldService.create();
+  const [isStoragePermitted, maskedResult] = await Promise.all([
+    pf.isStoragePermitted(user.id),
+    pf.listMasked(user.id),
+  ]);
+
+  const identityProfileFields = maskedResult.ok
+    ? maskedResult.data.map((f) => ({
+        id: f.id,
+        fieldKey: f.fieldKey,
+        label: f.label,
+        maskedValue: f.maskedValue,
+        includeInDiscovery: f.includeInDiscovery,
+      }))
+    : [];
+
   return (
     <OnboardingFlow
-      initialState={profile.onboardingState}
-      onStateChange={saveOnboardingProgressAction}
+      {...(isUpgradeMode
+        ? {}
+        : {
+            initialState: profile.onboardingState,
+            onStateChange: saveOnboardingProgressAction,
+          })}
+      isStoragePermitted={isStoragePermitted}
+      identityProfileFields={identityProfileFields}
+      isUpgradeMode={isUpgradeMode}
     />
   );
 }

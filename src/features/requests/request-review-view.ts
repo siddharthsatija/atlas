@@ -67,7 +67,7 @@ export type CreateDraftAction = (
 
 /** Mirrors the settings flow's action state, for just-in-time field capture. */
 export interface FieldCaptureState {
-  failure: "consent_required" | "invalid" | "not_found" | "unavailable" | null;
+  failure: "consent_required" | "field_in_use" | "invalid" | "not_found" | "unavailable" | null;
   label: string | null;
   fieldKey: PersonalFieldKey | null;
   saved?: boolean;

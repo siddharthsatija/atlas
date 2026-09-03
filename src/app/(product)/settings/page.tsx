@@ -12,12 +12,13 @@ import {
   addPersonalFieldAction,
   deletePersonalFieldAction,
   editPersonalFieldAction,
+  setIncludeInDiscoveryAction,
 } from "./actions";
 
 export const metadata: Metadata = { title: "Settings" };
 
 /**
- * Settings, currently carrying one section: Personal data (ATL-106).
+ * Settings, currently carrying one section: Personal data (ATL-106, ATL-209).
  *
  * The shell — navigation between Profile, Security, Privacy and AI, Notifications
  * and Data — is **ATL-074 – ATL-077** and is deliberately not built here. This
@@ -38,6 +39,14 @@ export const metadata: Metadata = { title: "Settings" };
  * consent panel and the disclosures are still true and still useful, and losing
  * them would leave someone unable to read how their data is handled because a
  * query failed. The service has already logged the fault.
+ *
+ * ## ATL-209: includeInDiscovery and setDiscoveryAction
+ *
+ * `listMasked` now returns `includeInDiscovery` on each record. The field mapping
+ * forwards it to the view model so `PersonalFieldsSection` can render
+ * `DiscoveryToggle` per row. `setIncludeInDiscoveryAction` is passed as the
+ * toggle's action — it is a direct-call server action, not a `useActionState`
+ * action, matching the `PersonalFieldToggleAction` contract.
  */
 export default async function SettingsPage() {
   const user = await requireVerifiedUser();
@@ -53,6 +62,9 @@ export default async function SettingsPage() {
    * `MaskedPersonalField` carries `userId`, `createdAt` and `updatedAt` that no
    * part of this surface renders, and a component that receives fields it does not
    * use is a component that can start using them without anyone deciding to.
+   *
+   * `includeInDiscovery` is included (ATL-209): the section needs it to initialise
+   * each `DiscoveryToggle`.
    */
   const fields: PersonalFieldView[] = listed.ok
     ? listed.data.map((field) => ({
@@ -61,6 +73,7 @@ export default async function SettingsPage() {
         label: field.label,
         maskedValue: field.maskedValue,
         lastUsedAt: field.lastUsedAt,
+        includeInDiscovery: field.includeInDiscovery,
       }))
     : [];
 
@@ -77,6 +90,7 @@ export default async function SettingsPage() {
         addAction={addPersonalFieldAction}
         editAction={editPersonalFieldAction}
         deleteAction={deletePersonalFieldAction}
+        setDiscoveryAction={setIncludeInDiscoveryAction}
       />
     </PageContainer>
   );

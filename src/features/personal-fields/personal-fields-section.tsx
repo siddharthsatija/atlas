@@ -8,19 +8,26 @@ import { PersonalFieldDelete } from "./personal-field-delete";
 import { PersonalFieldForm } from "./personal-field-form";
 import { PersonalFieldValue } from "./personal-field-value";
 import { PersonalFieldsConsent } from "./personal-fields-consent";
+import { DiscoveryToggle } from "./discovery-toggle";
 import type {
   PersonalFieldButtonAction,
   PersonalFieldFormAction,
+  PersonalFieldToggleAction,
   PersonalFieldView,
 } from "./personal-fields-view";
 
 /**
- * Settings → Personal data (ATL-106, frontend §15).
+ * Settings → Personal data (ATL-106, ATL-209, frontend §15).
  *
  * Renders the four things §15 asks for — a masked list, per-field reveal/edit/
  * delete, when each was last used, and an honest explanation of encryption and
  * AI usage — and nothing more. It is a section, not a page: ATL-074–ATL-077 own
  * the Settings shell, and this deliberately adds no navigation.
+ *
+ * ATL-209 adds a `DiscoveryToggle` per field (rendered between the last-used line
+ * and the action buttons) and a `setDiscoveryAction` prop that wires the toggle
+ * to `setIncludeInDiscoveryAction` in `settings/actions.ts`. The toggle is an
+ * optimistic control: it flips immediately and silently reverts on failure.
  *
  * ## Three states, and the difference between them is what the person may do
  *
@@ -43,6 +50,14 @@ import type {
  * granted *and* nothing saved is a first run, so the panel leads. Withdrawn with
  * rows present is a different situation and gets different words.
  *
+ * ## Discovery toggle in all states
+ *
+ * `DiscoveryToggle` is rendered regardless of `permitted` — enabling or disabling
+ * a field for discovery is a preference about use, not a new write. The same
+ * reasoning applies that makes deletion available in the withdrawn state: a person
+ * who revoked storage consent should still be able to un-enrol a field from
+ * discovery runs.
+ *
  * ## Every value arrives masked
  *
  * `fields` carries `maskedValue` from `listMasked`, which cannot return plaintext
@@ -57,6 +72,14 @@ export interface PersonalFieldsSectionProps {
   addAction: PersonalFieldFormAction;
   editAction: PersonalFieldFormAction;
   deleteAction: PersonalFieldButtonAction;
+  /**
+   * Toggles `include_in_discovery` on one field (ATL-209).
+   *
+   * Passed to each `DiscoveryToggle`. A direct-call server action —
+   * `(fieldId, enabled) => Promise<{ ok: boolean }>` — not a `useActionState`
+   * action. The toggle uses `useOptimistic` and silently reverts on failure.
+   */
+  setDiscoveryAction: PersonalFieldToggleAction;
 }
 
 /** Formats the last-used line, which is honest about never having been used. */
@@ -77,6 +100,7 @@ export function PersonalFieldsSection({
   addAction,
   editAction,
   deleteAction,
+  setDiscoveryAction,
 }: PersonalFieldsSectionProps) {
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -165,6 +189,16 @@ export function PersonalFieldsSection({
               <p className="text-body-sm text-text-muted" data-slot="personal-field-last-used">
                 {lastUsedText(field.lastUsedAt)}
               </p>
+
+              {/*
+                Discovery toggle (ATL-209). Rendered in all consent states —
+                toggling inclusion is a preference about use, not a write gate.
+              */}
+              <DiscoveryToggle
+                fieldId={field.id}
+                enabled={field.includeInDiscovery}
+                action={setDiscoveryAction}
+              />
 
               <div className="flex flex-wrap items-center gap-2">
                 {/*

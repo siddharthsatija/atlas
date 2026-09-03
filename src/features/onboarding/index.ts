@@ -13,3 +13,8 @@ export {
   ONBOARDING_LIMITATIONS,
   ONBOARDING_STEP_COPY,
 } from "./onboarding-copy";
+export {
+  IdentityProfileStep,
+  type IdentityProfileStepProps,
+  type IdentityProfileFieldView,
+} from "./identity-profile-step";
