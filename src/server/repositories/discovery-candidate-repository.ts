@@ -43,6 +43,32 @@ export interface CandidateSummary {
   readonly status: string;
 }
 
+/**
+ * Full candidate detail needed by the adjudication service (ATL-208).
+ *
+ * `assetId` is null for pending/dismissed/not_sure candidates; non-null for
+ * confirmed (and remains non-null after deconfirm — the asset is soft-deleted
+ * rather than unlinked so the bidirectional FK is preserved).
+ */
+export interface CandidateDetail {
+  readonly id: string;
+  readonly evidenceId: string;
+  readonly status: string;
+  readonly assetId: string | null;
+}
+
+/** Parameters forwarded verbatim to the `confirm_discovery_candidate` RPC (ATL-208). */
+export interface ConfirmCandidateParams {
+  assetId: string;
+  serviceName: string;
+  category: string;
+  serviceDomain: string | null;
+  /** Pre-encrypted ciphertext — the service layer encrypts before calling. */
+  accountIdentifierEncrypted: string | null;
+  sourceLabel: string | null;
+  confidence: string;
+}
+
 export class DiscoveryCandidateRepository {
   private readonly db: SupabaseClient<Database>;
 
@@ -131,6 +157,123 @@ export class DiscoveryCandidateRepository {
       throw new DiscoveryCandidateStoreError("createCanonical_result");
     }
     return data;
+  }
+
+  /**
+   * Fetches one candidate's adjudication-relevant columns.
+   *
+   * Returns null when the candidate does not exist or does not belong to the
+   * user — indistinguishable (non-oracle pattern, ADR-008 §8).
+   *
+   * Throws `DiscoveryCandidateStoreError` on any genuine database error.
+   */
+  async findById(userId: string, candidateId: string): Promise<CandidateDetail | null> {
+    const { data, error } = await this.db
+      .from("discovery_candidates")
+      .select("id, evidence_id, status, asset_id")
+      .eq("user_id", userId)
+      .eq("id", candidateId)
+      .maybeSingle();
+
+    if (error) throw new DiscoveryCandidateStoreError("findById");
+    if (!data) return null;
+    return {
+      id: data.id,
+      evidenceId: data.evidence_id,
+      status: data.status,
+      assetId: data.asset_id ?? null,
+    };
+  }
+
+  /**
+   * Moves a candidate to a new status, optionally requiring a current one.
+   *
+   * The `expectedStatus` guard is evaluated in SQL rather than in the service —
+   * no read-then-write window, and no partial failure if two callers race.
+   *
+   * Returns true when a row was actually updated; false when nothing matched
+   * (candidate not found, not yours, or wrong status).
+   *
+   * Throws `DiscoveryCandidateStoreError` on any genuine database error.
+   */
+  async updateStatus(
+    userId: string,
+    candidateId: string,
+    toStatus: string,
+    expectedStatus?: string,
+  ): Promise<boolean> {
+    let builder = this.db
+      .from("discovery_candidates")
+      .update({ status: toStatus })
+      .eq("user_id", userId)
+      .eq("id", candidateId);
+
+    if (expectedStatus !== undefined) {
+      builder = builder.eq("status", expectedStatus);
+    }
+
+    const { data, error } = await builder.select("id");
+
+    if (error) throw new DiscoveryCandidateStoreError("updateStatus");
+    return (data ?? []).length > 0;
+  }
+
+  /**
+   * Atomically confirms a pending candidate and creates its linked digital
+   * asset via the `confirm_discovery_candidate` Postgres RPC (ATL-208).
+   *
+   * Idempotent: if the candidate is already confirmed the RPC returns the
+   * existing asset_id without writing anything.
+   *
+   * Throws `DiscoveryCandidateStoreError` on any database error.
+   */
+  async confirmViaRpc(
+    userId: string,
+    candidateId: string,
+    params: ConfirmCandidateParams,
+  ): Promise<{ assetId: string; alreadyConfirmed: boolean }> {
+    const { data, error } = await this.db.rpc("confirm_discovery_candidate", {
+      p_user_id: userId,
+      p_candidate_id: candidateId,
+      p_asset_id: params.assetId,
+      p_service_name: params.serviceName,
+      p_category: params.category,
+      p_service_domain: params.serviceDomain,
+      p_account_identifier_encrypted: params.accountIdentifierEncrypted,
+      p_source_label: params.sourceLabel,
+      p_confidence: params.confidence,
+    });
+
+    if (error) throw new DiscoveryCandidateStoreError("confirmViaRpc");
+    const row = Array.isArray(data) ? data[0] : null;
+    if (!row) throw new DiscoveryCandidateStoreError("confirmViaRpc_result");
+    return { assetId: row.asset_id, alreadyConfirmed: row.already_confirmed };
+  }
+
+  /**
+   * Atomically deconfirms a confirmed candidate via the
+   * `deconfirm_discovery_candidate` Postgres RPC (ATL-208).
+   *
+   * The RPC soft-deletes the linked asset, transitions the candidate to
+   * rejected, and inserts the rejection fingerprint — all in one transaction.
+   * The fingerprint is computed application-side and passed in as p_fingerprint.
+   *
+   * Throws `DiscoveryCandidateStoreError` on any database error.
+   */
+  async deconfirmViaRpc(
+    userId: string,
+    candidateId: string,
+    fingerprint: string,
+    providerClass: string,
+  ): Promise<void> {
+    const { error } = await this.db.rpc("deconfirm_discovery_candidate", {
+      p_user_id: userId,
+      p_candidate_id: candidateId,
+      p_fingerprint: fingerprint,
+      p_provider_class: providerClass,
+    });
+
+    if (error) throw new DiscoveryCandidateStoreError("deconfirmViaRpc");
   }
 
   /**

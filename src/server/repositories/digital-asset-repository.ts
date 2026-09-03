@@ -60,6 +60,10 @@ export interface DigitalAssetRecord {
   metadata: AssetMetadata;
   createdAt: string;
   updatedAt: string;
+  /** Present when source_type = 'discovery'; the candidate that produced this asset (ATL-208). */
+  candidateId: string | null;
+  /** Non-null when the asset has been soft-deleted by a deconfirm (ATL-208). */
+  deletedAt: string | null;
 }
 
 function toRecord(row: DigitalAssetRow): DigitalAssetRecord {
@@ -82,6 +86,8 @@ function toRecord(row: DigitalAssetRow): DigitalAssetRecord {
     metadata: redactAssetMetadata((row.metadata_json ?? {}) as AssetMetadata).value,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    candidateId: row.candidate_id ?? null,
+    deletedAt: row.deleted_at ?? null,
   };
 }
 
@@ -107,6 +113,12 @@ export interface CreateDigitalAssetInput {
   lastVerifiedAt?: string | null;
   notes?: string | null;
   metadata?: AssetMetadata;
+  /**
+   * The discovery candidate that produced this asset (ATL-208).
+   * Required when source_type = 'discovery' (ATL-200 pairing constraint).
+   * The confirm RPC sets this; direct creates via this method may also set it.
+   */
+  candidateId?: string | null;
 }
 
 /**
@@ -190,6 +202,7 @@ export class DigitalAssetRepository {
         last_verified_at: input.lastVerifiedAt ?? null,
         notes: input.notes ?? null,
         metadata_json: metadata as Json,
+        candidate_id: input.candidateId ?? null,
       })
       .select("*")
       .single();
@@ -207,6 +220,8 @@ export class DigitalAssetRepository {
       // Ownership is a predicate, not an assumption. Without it, a caller
       // holding any asset id would read another user's row through service-role.
       .eq("user_id", userId)
+      // Exclude soft-deleted assets (deconfirmed discovery assets — ATL-208).
+      .is("deleted_at", null)
       .maybeSingle();
 
     if (error) throw new DigitalAssetStoreError();
@@ -226,7 +241,12 @@ export class DigitalAssetRepository {
    * the page boundary ambiguous and cursor pagination can repeat or skip one.
    */
   async list(userId: string, query: AssetQuery): Promise<DigitalAssetRecord[]> {
-    let builder = this.db.from("digital_assets").select("*").eq("user_id", userId);
+    let builder = this.db
+      .from("digital_assets")
+      .select("*")
+      .eq("user_id", userId)
+      // Exclude soft-deleted assets (deconfirmed discovery assets — ATL-208).
+      .is("deleted_at", null);
 
     if (query.category?.length) builder = builder.in("category", query.category);
     if (query.status?.length) builder = builder.in("status", query.status);
@@ -315,6 +335,10 @@ export class DigitalAssetRepository {
       .from("digital_assets")
       .select("*")
       .eq("user_id", userId)
+      // Exclude soft-deleted assets (deconfirmed discovery assets — ATL-208).
+      // Soft-deleted rows are rejected candidates; the rules engine must not
+      // reason from them — they carry no live exposure.
+      .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false });
 
@@ -399,6 +423,53 @@ export class DigitalAssetRepository {
 
     if (error) throw new DigitalAssetStoreError();
     return (data ?? []).length > 0;
+  }
+
+  /**
+   * Soft-deletes an asset by setting `deleted_at` (ATL-208 deconfirm).
+   *
+   * The deconfirm RPC performs the soft-delete atomically; this method exists
+   * as a standalone escape hatch. Idempotent: if `deleted_at` is already set
+   * (already soft-deleted), the WHERE clause matches 0 rows and returns false.
+   *
+   * Returns true when a row was actually updated, false when the asset was not
+   * found, not owned by the user, or already soft-deleted.
+   */
+  async softDelete(userId: string, assetId: string): Promise<boolean> {
+    const { data, error } = await this.db
+      .from("digital_assets")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", assetId)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .select("id");
+
+    if (error) throw new DigitalAssetStoreError();
+    return (data ?? []).length > 0;
+  }
+
+  /**
+   * Finds the asset linked to a discovery candidate, regardless of `deleted_at`.
+   *
+   * The `deleted_at IS NULL` exclusion is deliberately absent here.  The
+   * deconfirm flow must be able to verify an asset exists even after it has
+   * been soft-deleted (idempotency on retry), so filtering it out would break
+   * re-entrant deconfirm.
+   *
+   * Throws `DigitalAssetStoreError` on a database error; returns null when no
+   * row matches `(user_id, candidate_id)` (covers both "not found" and
+   * "not yours" — non-oracle pattern).
+   */
+  async findByCandidateId(userId: string, candidateId: string): Promise<DigitalAssetRecord | null> {
+    const { data, error } = await this.db
+      .from("digital_assets")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("candidate_id", candidateId)
+      .maybeSingle();
+
+    if (error) throw new DigitalAssetStoreError();
+    return data ? toRecord(data) : null;
   }
 
   /**

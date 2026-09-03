@@ -94,7 +94,7 @@ export type FindingConfidence = (typeof FINDING_CONFIDENCES)[number];
  * removed with the demo data (ATL-083), and §11.2 forbids demo and real records
  * mixing in one calculation. The rest are inherited rather than invented.
  */
-export const FINDING_SOURCE_TYPES = ["manual", "demo", "connector", "import"] as const;
+export const FINDING_SOURCE_TYPES = ["manual", "demo", "connector", "import", "discovery"] as const;
 
 export type FindingSourceType = (typeof FINDING_SOURCE_TYPES)[number];
 

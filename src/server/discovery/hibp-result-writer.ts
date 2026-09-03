@@ -1,9 +1,8 @@
 import "server-only";
 
-import { createHmac } from "node:crypto";
 import { createServiceRoleClient } from "@/server/db/service-role-client";
 import { EncryptionService } from "@/server/crypto/encryption-service";
-import { RejectionKeyService } from "@/server/crypto/rejection-key-service";
+import { RejectionKeyService, type RejectionKey } from "@/server/crypto/rejection-key-service";
 import { CryptoError, zeroize } from "@/server/crypto/envelope";
 import {
   DiscoveryEvidenceRepository,
@@ -11,6 +10,7 @@ import {
 } from "@/server/repositories/discovery-evidence-repository";
 import { DiscoveryCandidateRepository } from "@/server/repositories/discovery-candidate-repository";
 import { DiscoveryRejectionRepository } from "@/server/repositories/discovery-rejection-repository";
+import { buildRejectionFingerprint } from "@/server/crypto/rejection-fingerprint";
 import { HIBP_PROVIDER_CLASS, type HibpBreachMatch, type HibpProviderData } from "./hibp-adapter";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -123,7 +123,7 @@ export class HibpResultWriter {
     }
 
     // Fetch the rejection key once.  It is per-user, not per-breach.
-    let rejectionKey: Buffer | null = null;
+    let rejectionKey: RejectionKey | null = null;
     let skipCandidates = false;
     try {
       rejectionKey = await this.rejectionKeys.getRejectionKey(userId);
@@ -170,7 +170,7 @@ export class HibpResultWriter {
     invocationId: string,
     fieldId: string,
     breach: HibpBreachMatch,
-    rejectionKey: Buffer | null,
+    rejectionKey: RejectionKey | null,
     skipCandidates: boolean,
   ): Promise<void> {
     const sourceIdentifier = breach.Name.trim().toLowerCase();
@@ -223,7 +223,11 @@ export class HibpResultWriter {
     }
 
     // Check whether the user previously rejected this source.
-    const fingerprint = buildRejectionFingerprint(rejectionKey, sourceIdentifier);
+    const fingerprint = buildRejectionFingerprint(
+      rejectionKey,
+      HIBP_PROVIDER_CLASS,
+      sourceIdentifier,
+    );
     const isRejected = await this.rejections.exists(userId, HIBP_PROVIDER_CLASS, fingerprint);
     if (!isRejected) {
       await this.candidates.insert(userId, evidenceId);
@@ -255,22 +259,4 @@ function isHibpProviderData(data: unknown): data is HibpProviderData {
     Array.isArray(d.breaches) &&
     d.breaches.every(isHibpBreachMatch)
   );
-}
-
-// ── Fingerprint ───────────────────────────────────────────────────────────────
-
-/**
- * Builds a rejection fingerprint for one source identifier.
- *
- * HMAC input: `provider_class + NUL + source_identifier` (ADR-008 §5,
- * docs/05-feature-ticket-list.md ATL-207 §fingerprint).
- *
- * Stored as `{"v":1,"alg":"hmac-sha256","value":"<base64url>"}`.
- *
- * Must never be logged (ADR-008 §8).
- */
-function buildRejectionFingerprint(key: Buffer, sourceIdentifier: string): string {
-  const hmacInput = `${HIBP_PROVIDER_CLASS}\x00${sourceIdentifier}`;
-  const value = createHmac("sha256", key).update(hmacInput).digest("base64url");
-  return JSON.stringify({ v: 1, alg: "hmac-sha256", value });
 }

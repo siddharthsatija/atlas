@@ -41,7 +41,13 @@ const COLUMN_DEFAULTS: Record<string, Row> = {
     resolved_at: null,
     input_hash: null,
   },
-  digital_assets: { status: "active", source_type: "manual", confidence: "medium" },
+  digital_assets: {
+    status: "active",
+    source_type: "manual",
+    confidence: "medium",
+    deleted_at: null,
+    candidate_id: null,
+  },
   asset_data_categories: { sensitivity: "standard", confidence: "medium" },
   asset_permissions: { status: "active", scope: "limited" },
 };
@@ -216,6 +222,8 @@ const seedAsset = (overrides: Row = {}): string => {
     notes: null,
     metadata_json: {},
     account_identifier_encrypted: null,
+    deleted_at: null,
+    candidate_id: null,
     created_at: daysAgo(400),
     updated_at: daysAgo(1),
     ...overrides,

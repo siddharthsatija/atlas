@@ -1150,6 +1150,23 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      confirm_discovery_candidate: {
+        Args: {
+          p_user_id: string
+          p_candidate_id: string
+          p_asset_id: string
+          p_service_name: string
+          p_category: string
+          p_service_domain: string | null
+          p_account_identifier_encrypted: string | null
+          p_source_label: string | null
+          p_confidence: string
+        }
+        Returns: {
+          asset_id: string
+          already_confirmed: boolean
+        }[]
+      }
       create_canonical_candidate: {
         Args: {
           p_user_id: string
@@ -1158,6 +1175,15 @@ export type Database = {
           p_canonical_profile_uri: string
         }
         Returns: string
+      }
+      deconfirm_discovery_candidate: {
+        Args: {
+          p_user_id: string
+          p_candidate_id: string
+          p_fingerprint: string
+          p_provider_class: string
+        }
+        Returns: undefined
       }
     }
     Enums: {

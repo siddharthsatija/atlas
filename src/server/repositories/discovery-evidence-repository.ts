@@ -59,6 +59,36 @@ export class DiscoveryEvidenceRepository {
   }
 
   /**
+   * Returns the provider identity columns for one evidence row (ATL-208).
+   *
+   * Used by the adjudication service to obtain the `provider_class` and
+   * `source_identifier` needed to build the rejection fingerprint.
+   *
+   * Returns null when the evidence does not exist or does not belong to the
+   * user — indistinguishable (non-oracle pattern, ADR-008 §8).
+   *
+   * Throws `DiscoveryEvidenceStoreError` on any genuine database error.
+   */
+  async findProviderIdentity(
+    userId: string,
+    evidenceId: string,
+  ): Promise<{ providerClass: string; sourceIdentifier: string } | null> {
+    const { data, error } = await this.db
+      .from("discovery_evidence")
+      .select("provider_class, source_identifier")
+      .eq("user_id", userId)
+      .eq("id", evidenceId)
+      .maybeSingle();
+
+    if (error) throw new DiscoveryEvidenceStoreError("findProviderIdentity");
+    if (!data) return null;
+    return {
+      providerClass: data.provider_class,
+      sourceIdentifier: data.source_identifier,
+    };
+  }
+
+  /**
    * Inserts one evidence row, idempotent on the
    * `(user_id, invocation_id, provider_class, field_id, source_identifier)` key.
    *

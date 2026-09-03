@@ -119,7 +119,14 @@ function createDb(): SupabaseClient<Database> {
       insert: (values: Row) => {
         operation = "insert";
         const now = new Date().toISOString();
-        pending = { id: randomUUID(), created_at: now, updated_at: now, ...values };
+        pending = {
+          id: randomUUID(),
+          created_at: now,
+          updated_at: now,
+          deleted_at: null,
+          candidate_id: null,
+          ...values,
+        };
         store.set(String(pending.id), { ...pending });
         return self;
       },
@@ -217,6 +224,8 @@ const seedAsset = (serviceName: string, overrides: Row = {}): string => {
     notes: null,
     metadata_json: {},
     account_identifier_encrypted: null,
+    deleted_at: null,
+    candidate_id: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -991,6 +1000,8 @@ describe("the detail read model (ATL-041)", () => {
       notes: null,
       metadata_json: {},
       account_identifier_encrypted: null,
+      deleted_at: null,
+      candidate_id: null,
       created_at: "2026-01-01T00:00:00.000Z",
       updated_at: "2026-01-01T00:00:00.000Z",
     });

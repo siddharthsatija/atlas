@@ -39,6 +39,29 @@ export class DiscoveryRejectionRepository {
   }
 
   /**
+   * Records a rejection fingerprint for this user.
+   *
+   * Idempotent on `(user_id, fingerprint)`: a second insert for the same
+   * fingerprint silently succeeds (ON CONFLICT DO NOTHING via `ignoreDuplicates`).
+   * The adjudication service inserts the fingerprint BEFORE transitioning the
+   * candidate status so that a partial failure on the status update leaves the
+   * fingerprint in place — a retry will re-insert (ignored) and re-attempt the
+   * transition.
+   *
+   * Throws `DiscoveryRejectionStoreError` on any genuine database error.
+   */
+  async insert(userId: string, providerClass: string, fingerprint: string): Promise<void> {
+    const { error } = await this.db
+      .from("discovery_rejections")
+      .upsert(
+        { user_id: userId, provider_class: providerClass, fingerprint },
+        { ignoreDuplicates: true },
+      );
+
+    if (error) throw new DiscoveryRejectionStoreError("insert");
+  }
+
+  /**
    * Returns `true` when a rejection with the given fingerprint and provider
    * class already exists for this user.
    *

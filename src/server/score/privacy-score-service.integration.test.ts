@@ -190,6 +190,8 @@ const seedAsset = (overrides: Row = {}): string => {
     notes: null,
     metadata_json: {},
     account_identifier_encrypted: null,
+    deleted_at: null,
+    candidate_id: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
     ...overrides,

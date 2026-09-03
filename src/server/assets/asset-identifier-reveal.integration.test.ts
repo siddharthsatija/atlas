@@ -82,6 +82,8 @@ function createDb(): SupabaseClient<Database> {
           status: "active",
           created_at: now,
           updated_at: now,
+          deleted_at: null,
+          candidate_id: null,
           ...values,
         };
         if (!brokenTables.has(tableName)) store.set(String(pending.id), { ...pending });

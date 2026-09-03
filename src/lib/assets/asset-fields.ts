@@ -35,7 +35,7 @@ export type AssetStatus = (typeof ASSET_STATUSES)[number];
  * is the one source that changes how a record is treated rather than merely how
  * it is labelled.
  */
-export const ASSET_SOURCE_TYPES = ["manual", "demo", "connector", "import"] as const;
+export const ASSET_SOURCE_TYPES = ["manual", "demo", "connector", "import", "discovery"] as const;
 
 export type AssetSourceType = (typeof ASSET_SOURCE_TYPES)[number];
 

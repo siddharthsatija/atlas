@@ -22,8 +22,13 @@ import {
 
 const ROOT = join(__dirname, "../..");
 const MIGRATION = "supabase/migrations/20260806090000_create_digital_assets.sql";
+/** ATL-208 adds 'discovery' to the source_type constraint via ALTER TABLE. */
+const MIGRATION_208 = "supabase/migrations/20260903090000_atl_208_confirm_deconfirm.sql";
 
-const sql = readFileSync(join(ROOT, MIGRATION), "utf8");
+const sql =
+  readFileSync(join(ROOT, MIGRATION), "utf8") +
+  "\n" +
+  readFileSync(join(ROOT, MIGRATION_208), "utf8");
 /** Statements only — comments explain intent and must not satisfy an assertion. */
 const statements = sql.replace(/--[^\n]*/g, "");
 
@@ -99,12 +104,14 @@ describe("vocabularies match the application", () => {
    * (§11). These assertions are what keep the two copies honest.
    */
   const constraintValues = (column: string): string[] => {
-    const match = new RegExp(
-      `${column}\\s+text[^,]*?check\\s*\\(\\s*${column}\\s+in\\s*\\(([^)]*)\\)`,
-      "i",
-    ).exec(statements);
-    if (!match?.[1]) throw new Error(`no check constraint found for ${column}`);
-    return [...match[1].matchAll(/'([^']+)'/g)].map((entry) => entry[1] as string).sort();
+    // Match both inline column-level checks (CREATE TABLE) and standalone
+    // ADD CONSTRAINT checks (ALTER TABLE). Later migrations override earlier
+    // ones, so use the last match found.
+    const re = new RegExp(`${column}\\s+in\\s*\\(([^)]*)\\)`, "gi");
+    const allMatches = [...statements.matchAll(re)];
+    const last = allMatches.at(-1);
+    if (!last?.[1]) throw new Error(`no check constraint found for ${column}`);
+    return [...last[1].matchAll(/'([^']+)'/g)].map((entry) => entry[1] as string).sort();
   };
 
   it("status", () => {

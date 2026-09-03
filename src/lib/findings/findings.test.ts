@@ -146,7 +146,7 @@ describe("source types", () => {
   it("mirrors the asset vocabulary, including the documented demo value", () => {
     // §11.1 pins `demo`: those findings are removed with the demo data, and
     // §11.2 forbids demo and real records mixing in one calculation.
-    expect(FINDING_SOURCE_TYPES).toEqual(["manual", "demo", "connector", "import"]);
+    expect(FINDING_SOURCE_TYPES).toEqual(["manual", "demo", "connector", "import", "discovery"]);
     expect(isFindingSourceType("demo")).toBe(true);
     expect(isFindingSourceType("guessed")).toBe(false);
   });
