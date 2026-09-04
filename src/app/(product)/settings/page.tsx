@@ -14,7 +14,6 @@ import {
   editPersonalFieldAction,
   setIncludeInDiscoveryAction,
 } from "./actions";
-import { grantDiscoveryConsentAction, revokeDiscoveryConsentAction } from "./discovery-actions";
 import { DiscoverySection } from "@/features/discovery";
 import type { DiscoveryAcknowledgmentView, DiscoveryConsentState } from "@/features/discovery";
 import { DiscoveryConsentService } from "@/server/discovery/discovery-consent-service";
@@ -176,18 +175,6 @@ export default async function SettingsPage() {
         consentStateByType={discoveryConsentStateByType}
         acknowledgmentHistory={acknowledgmentHistory}
         acknowledgmentHistoryUnavailable={acknowledgmentHistoryUnavailable}
-        grantActionFactory={(consentType) =>
-          grantDiscoveryConsentAction.bind(
-            null,
-            consentType as Parameters<typeof grantDiscoveryConsentAction>[0],
-          )
-        }
-        revokeActionFactory={(consentType) =>
-          revokeDiscoveryConsentAction.bind(
-            null,
-            consentType as Parameters<typeof revokeDiscoveryConsentAction>[0],
-          )
-        }
       />
     </PageContainer>
   );

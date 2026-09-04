@@ -56,8 +56,13 @@ export interface DiscoverySectionProps {
   consentStateByType: Record<string, DiscoveryConsentState>;
   acknowledgmentHistory: readonly DiscoveryAcknowledgmentView[];
   acknowledgmentHistoryUnavailable?: boolean;
-  grantActionFactory: (consentType: string) => DiscoveryConsentGrantAction;
-  revokeActionFactory: (consentType: string) => DiscoveryConsentRevokeAction;
+  /**
+   * Required when providers is non-empty; omitted by the Server Component
+   * when ACTIVE_DISCOVERY_PROVIDERS is empty (ATL-210 ship state).
+   * ATL-217 will supply pre-bound Server Actions here.
+   */
+  grantActionFactory?: (consentType: string) => DiscoveryConsentGrantAction;
+  revokeActionFactory?: (consentType: string) => DiscoveryConsentRevokeAction;
 }
 
 // ---- Component --------------------------------------------------------------
@@ -101,13 +106,16 @@ export function DiscoverySection({
           {uniqueTypes.map((consentType) => {
             const provider = providerByType.get(consentType);
             if (!provider) return null;
+            // grantActionFactory is optional: absent when providers list is
+            // empty (ATL-210 ship state). If somehow reached without it, skip.
+            if (!grantActionFactory) return null;
 
             const state = consentStateByType[consentType];
             const isConsented = state?.granted ?? false;
             const grantedAt = state?.grantedAt ?? null;
             const isConfirming = confirmingRevoke === consentType;
 
-            if (isConsented && isConfirming) {
+            if (isConsented && isConfirming && revokeActionFactory) {
               return (
                 <RevokeConfirmPanel
                   key={consentType}
