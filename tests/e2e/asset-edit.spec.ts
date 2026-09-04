@@ -376,6 +376,8 @@ test.describe("another user", () => {
       for (let step = 0; step < 3; step++) {
         await page.getByRole("button", { name: "Skip" }).click();
       }
+      // identity_profile is mandatory (ATL-209).
+      await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Go to my dashboard" }).click();
       await page.waitForURL(/\/overview(\?.*)?$/);
     }
