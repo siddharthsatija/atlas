@@ -14,6 +14,16 @@ import {
   editPersonalFieldAction,
   setIncludeInDiscoveryAction,
 } from "./actions";
+import { grantDiscoveryConsentAction, revokeDiscoveryConsentAction } from "./discovery-actions";
+import { DiscoverySection } from "@/features/discovery";
+import type { DiscoveryAcknowledgmentView, DiscoveryConsentState } from "@/features/discovery";
+import { DiscoveryConsentService } from "@/server/discovery/discovery-consent-service";
+import {
+  DisclosureAcknowledgmentRepository,
+  type DisclosureAcknowledgmentRecord,
+} from "@/server/repositories/disclosure-acknowledgment-repository";
+import { createServiceRoleClient } from "@/server/db/service-role-client";
+import { getUiVisibleProviders } from "@/lib/discovery/discovery-provider-registry";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -57,6 +67,37 @@ export default async function SettingsPage() {
     service.isStoragePermitted(user.id),
   ]);
 
+  // ATL-210: resolve discovery providers, consent state, and ack history.
+  const activeProviders = getUiVisibleProviders();
+  const uniqueConsentTypes = Array.from(new Set(activeProviders.map((p) => p.consentType)));
+
+  const db = createServiceRoleClient();
+  const discoveryService = DiscoveryConsentService.create(db);
+  const ackRepo = new DisclosureAcknowledgmentRepository(db);
+
+  // Consent checks — one per unique consent type. Empty in ATL-210 ship state.
+  const consentCheckResults = await Promise.all(
+    uniqueConsentTypes.map(async (consentType) => {
+      try {
+        const granted = await discoveryService.hasActiveConsent(user.id, consentType);
+        return { consentType, granted };
+      } catch {
+        return { consentType, granted: false };
+      }
+    }),
+  );
+
+  // Acknowledgment history.
+  let rawAckHistoryRows: DisclosureAcknowledgmentRecord[] = [];
+  let acknowledgmentHistoryUnavailable = false;
+  if (activeProviders.length > 0) {
+    try {
+      rawAckHistoryRows = await ackRepo.listByUser(user.id);
+    } catch {
+      acknowledgmentHistoryUnavailable = true;
+    }
+  }
+
   /**
    * Mapped into the feature's own view model rather than passed through.
    * `MaskedPersonalField` carries `userId`, `createdAt` and `updatedAt` that no
@@ -77,6 +118,43 @@ export default async function SettingsPage() {
       }))
     : [];
 
+  // Build discovery consent state map.
+  const discoveryConsentStateByType: Record<string, DiscoveryConsentState> = {};
+  for (const result of consentCheckResults) {
+    discoveryConsentStateByType[result.consentType] = {
+      consentType: result.consentType,
+      granted: result.granted,
+      grantedAt: null,
+    };
+  }
+
+  // Join acknowledgment rows with masked field data for display.
+  const maskedFieldMap = new Map(
+    (listed.ok ? listed.data : []).map((f) => [
+      f.id,
+      { label: f.label, maskedValue: f.maskedValue },
+    ]),
+  );
+
+  const acknowledgmentHistory: DiscoveryAcknowledgmentView[] = rawAckHistoryRows.map((row) => {
+    const fieldData = maskedFieldMap.get(row.fieldId);
+    return {
+      fieldId: row.fieldId,
+      fieldLabel: fieldData?.label ?? row.fieldId,
+      maskedValue: fieldData?.maskedValue ?? "••••",
+      providerClass: row.providerClass,
+      disclosureContractVersion: row.disclosureContractVersion,
+      acknowledgedAt: row.acknowledgedAt,
+    };
+  });
+
+  const activeDiscoveryProviders = activeProviders.map((p) => ({
+    providerClass: p.providerClass,
+    consentType: p.consentType,
+    disclosureClass: p.disclosureClass,
+    disclosureContractVersion: p.disclosureContractVersion,
+  }));
+
   return (
     <PageContainer>
       <PageHeader>
@@ -91,6 +169,25 @@ export default async function SettingsPage() {
         editAction={editPersonalFieldAction}
         deleteAction={deletePersonalFieldAction}
         setDiscoveryAction={setIncludeInDiscoveryAction}
+      />
+
+      <DiscoverySection
+        providers={activeDiscoveryProviders}
+        consentStateByType={discoveryConsentStateByType}
+        acknowledgmentHistory={acknowledgmentHistory}
+        acknowledgmentHistoryUnavailable={acknowledgmentHistoryUnavailable}
+        grantActionFactory={(consentType) =>
+          grantDiscoveryConsentAction.bind(
+            null,
+            consentType as Parameters<typeof grantDiscoveryConsentAction>[0],
+          )
+        }
+        revokeActionFactory={(consentType) =>
+          revokeDiscoveryConsentAction.bind(
+            null,
+            consentType as Parameters<typeof revokeDiscoveryConsentAction>[0],
+          )
+        }
       />
     </PageContainer>
   );

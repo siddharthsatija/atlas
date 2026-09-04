@@ -5,6 +5,10 @@ import { OnboardingService } from "@/server/onboarding/onboarding-service";
 import { PersonalFieldService } from "@/server/personal-fields/personal-field-service";
 import { OnboardingFlow } from "./onboarding-flow";
 import { saveOnboardingProgressAction } from "./actions";
+import { DiscoveryConsentService } from "@/server/discovery/discovery-consent-service";
+import { createServiceRoleClient } from "@/server/db/service-role-client";
+import { getUiVisibleProviders } from "@/lib/discovery/discovery-provider-registry";
+import type { DiscoveryConsentState } from "@/features/discovery";
 
 /**
  * Onboarding (ATL-016, ATL-209, frontend §17, PRD §9.1).
@@ -95,6 +99,44 @@ export default async function OnboardingPage() {
       }))
     : [];
 
+  // ATL-210: Resolve active discovery providers and consent state.
+  // Empty in ship state — activates when ATL-217 registers a provider.
+  const activeDiscoveryProviders = getUiVisibleProviders();
+  const uniqueConsentTypes = Array.from(
+    new Set(activeDiscoveryProviders.map((p) => p.consentType)),
+  );
+
+  const discoveryConsentStateByType: Record<string, DiscoveryConsentState> = {};
+  if (activeDiscoveryProviders.length > 0) {
+    const db = createServiceRoleClient();
+    const discoveryService = DiscoveryConsentService.create(db);
+    const consentResults = await Promise.all(
+      uniqueConsentTypes.map(async (consentType) => {
+        try {
+          const granted = await discoveryService.hasActiveConsent(user.id, consentType);
+          return { consentType, granted };
+        } catch {
+          return { consentType, granted: false };
+        }
+      }),
+    );
+    for (const result of consentResults) {
+      discoveryConsentStateByType[result.consentType] = {
+        consentType: result.consentType,
+        granted: result.granted,
+        grantedAt: null,
+      };
+    }
+  }
+
+  // Map provider metadata to view model for OnboardingFlow.
+  const activeProviderViews = activeDiscoveryProviders.map((p) => ({
+    providerClass: p.providerClass,
+    consentType: p.consentType,
+    disclosureClass: p.disclosureClass,
+    disclosureContractVersion: p.disclosureContractVersion,
+  }));
+
   return (
     <OnboardingFlow
       {...(isUpgradeMode
@@ -106,6 +148,8 @@ export default async function OnboardingPage() {
       isStoragePermitted={isStoragePermitted}
       identityProfileFields={identityProfileFields}
       isUpgradeMode={isUpgradeMode}
+      activeDiscoveryProviders={activeProviderViews}
+      discoveryConsentStateByType={discoveryConsentStateByType}
     />
   );
 }

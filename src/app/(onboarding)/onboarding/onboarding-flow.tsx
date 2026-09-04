@@ -23,6 +23,9 @@ import {
   type IdentityProfileFieldView,
 } from "@/features/onboarding";
 import { completeOnboardingAction } from "./actions";
+import { grantDiscoveryConsentForOnboardingAction } from "./discovery-consent-actions";
+import { DiscoveryConsentSection } from "@/features/discovery";
+import type { DiscoveryProviderView, DiscoveryConsentState } from "@/features/discovery";
 import {
   grantStorageConsentForOnboardingAction,
   saveOnboardingFieldAction,
@@ -117,6 +120,13 @@ export interface OnboardingFlowProps {
    * `/overview` rather than advancing to `ready`.
    */
   isUpgradeMode?: boolean;
+
+  // ---- ATL-210: discovery consent props --------------------------------
+
+  /** Active discovery providers for the consent section. Empty in ATL-210 ship state. */
+  activeDiscoveryProviders?: readonly DiscoveryProviderView[];
+  /** Consent state by consent type, for each active provider. */
+  discoveryConsentStateByType?: Record<string, DiscoveryConsentState>;
 }
 
 export function OnboardingFlow({
@@ -125,6 +135,8 @@ export function OnboardingFlow({
   isStoragePermitted = false,
   identityProfileFields = [],
   isUpgradeMode = false,
+  activeDiscoveryProviders = [],
+  discoveryConsentStateByType = {},
 }: OnboardingFlowProps = {}) {
   const resumed = initialState ?? INITIAL_ONBOARDING_STATE;
 
@@ -259,6 +271,21 @@ export function OnboardingFlow({
               removeFieldAction={removeOnboardingFieldAction}
               completeAction={completeIdentityProfileStepAction}
               onAdvance={advance}
+            />
+          </CardContent>
+        )}
+
+        {step === "identity_profile" && activeDiscoveryProviders.length > 0 && (
+          <CardContent>
+            <DiscoveryConsentSection
+              providers={activeDiscoveryProviders}
+              consentStateByType={discoveryConsentStateByType}
+              grantActionFactory={(consentType) =>
+                grantDiscoveryConsentForOnboardingAction.bind(
+                  null,
+                  consentType as Parameters<typeof grantDiscoveryConsentForOnboardingAction>[0],
+                )
+              }
             />
           </CardContent>
         )}

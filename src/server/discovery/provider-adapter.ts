@@ -37,7 +37,8 @@ import type { DiscoveryEligibleField } from "@/server/personal-fields/personal-f
  *   third-party API (e.g. username enumeration against a platform API).
  * - `broker_query`: the value is submitted to a data-broker service.
  */
-export type DisclosureClass = "hashed_query" | "identifying_lookup" | "broker_query";
+import type { DisclosureClass } from "@/lib/discovery/types";
+export type { DisclosureClass } from "@/lib/discovery/types";
 
 /**
  * The result of one provider HTTP call.

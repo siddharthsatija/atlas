@@ -23,6 +23,20 @@ import type { Database } from "@/types/database.generated";
  * (claiming not-acknowledged when they could not tell). Callers treat a throw
  * as a transient failure and surface it as UNAVAILABLE.
  */
+/**
+ * A row returned by listByUser — carries only display-safe fields.
+ * The full field value is never selected; callers receive the field id and
+ * join against masked field data in the page layer.
+ */
+export interface DisclosureAcknowledgmentRecord {
+  readonly id: string;
+  readonly fieldId: string;
+  readonly providerClass: string;
+  readonly disclosureContractVersion: string;
+  /** ISO timestamp (created_at column). */
+  readonly acknowledgedAt: string;
+}
+
 export class DisclosureAcknowledgmentRepository {
   private readonly db: SupabaseClient<Database>;
 
@@ -82,6 +96,31 @@ export class DisclosureAcknowledgmentRepository {
 
     if (error) throw new DisclosureAcknowledgmentStoreError();
     return (data ?? []).length > 0;
+  }
+
+  /**
+   * Lists all first-disclosure acknowledgments for the given user, newest first.
+   *
+   * Read-only — this method makes no writes and never records an acknowledgment.
+   * Throws on any database error; callers surface this as a "history unavailable"
+   * notice rather than silently showing an empty list.
+   */
+  async listByUser(userId: string): Promise<DisclosureAcknowledgmentRecord[]> {
+    const { data, error } = await this.db
+      .from("discovery_first_disclosure_acknowledgments")
+      .select("id, field_id, provider_class, disclosure_contract_version, acknowledged_at")
+      .eq("user_id", userId)
+      .order("acknowledged_at", { ascending: false });
+
+    if (error) throw new DisclosureAcknowledgmentStoreError();
+
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      fieldId: row.field_id,
+      providerClass: row.provider_class,
+      disclosureContractVersion: row.disclosure_contract_version,
+      acknowledgedAt: row.acknowledged_at,
+    }));
   }
 }
 
