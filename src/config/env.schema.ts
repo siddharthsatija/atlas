@@ -122,6 +122,20 @@ export const serverEnvSchema = z.object({
    * never sent on Step 2 (catalogue) requests which are public.
    */
   HIBP_API_KEY: z.string().min(1).optional(),
+
+  // --- GitHub discovery provider (ATL-217) ----------------------------------
+  /**
+   * Optional GitHub personal access token (classic or fine-grained).
+   *
+   * The GitHub Users API is publicly accessible without authentication, but
+   * unauthenticated requests are subject to a low rate limit (60 req/hour per
+   * IP).  Providing a token raises the limit to 5 000 req/hour (classic) or
+   * per-token limits for fine-grained tokens.
+   *
+   * Never logged, never included in client bundles.  Transmitted as the
+   * `Authorization: Bearer <token>` header on profile lookup requests only.
+   */
+  GITHUB_TOKEN: z.string().min(1).optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

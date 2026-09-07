@@ -47,7 +47,22 @@ export interface DiscoveryProviderMetadata {
  * provider adapter. When this list is empty, the discovery consent section
  * in onboarding and Settings > Discovery are hidden entirely.
  */
-export const ACTIVE_DISCOVERY_PROVIDERS: readonly DiscoveryProviderMetadata[] = [];
+// ATL-217: GitHub external identity discovery provider.
+//
+// These values MUST stay in sync with the constants declared in
+// `src/server/discovery/github-adapter.ts` (GITHUB_PROVIDER_CLASS,
+// CONSENT_TYPE, DISCLOSURE_CLASS, DISCLOSURE_CONTRACT_VERSION,
+// eligibleFieldTypes).  The adapter is server-only and cannot be imported here
+// (this module is shared across server and client boundaries).
+export const ACTIVE_DISCOVERY_PROVIDERS: readonly DiscoveryProviderMetadata[] = [
+  {
+    providerClass: "discovery_github_profile",
+    consentType: "discovery_identifying",
+    disclosureClass: "identifying_lookup",
+    disclosureContractVersion: "v1",
+    eligibleFieldTypes: new Set<PersonalFieldKey>(["username"]),
+  },
+];
 
 /**
  * Returns the subset of ACTIVE_DISCOVERY_PROVIDERS that the consent UI should

@@ -73,6 +73,17 @@ const KNOWN_PLATFORMS: readonly KnownPlatformConfig[] = [
     stripFragment: true,
     lowercasePath: true,
   },
+  // ATL-217: GitHub profile URIs — https://github.com/{login}.
+  // GitHub usernames are case-insensitive; path is lowercased for canonical
+  // deduplication.  Query parameters and fragments are not meaningful for
+  // profile identity and are stripped.
+  {
+    canonicalHost: "github.com",
+    aliases: ["github.com"],
+    stripQuery: true,
+    stripFragment: true,
+    lowercasePath: true,
+  },
 ];
 
 /** Alias → config lookup table built once at module initialisation time. */
