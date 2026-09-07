@@ -30,10 +30,16 @@ export const APP_TAGLINE = "Map your digital identity.";
 
 /**
  * Primary navigation order. Defined by PRD §12 and frontend spec §3.
+ *
+ * ATL-212: "discover" is inserted at position 2 (after "overview") per
+ * PRD §12, which places the Discover surface second in the primary navigation:
+ * Overview → Discover → Digital Assets → Privacy Insights → …
+ *
  * Labels only — the shell that consumes this is ATL-005.
  */
 export const NAV_ORDER = [
   "overview",
+  "discover",
   "assets",
   "insights",
   "requests",

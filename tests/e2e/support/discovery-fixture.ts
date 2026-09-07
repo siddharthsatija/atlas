@@ -288,3 +288,72 @@ export async function removeSeededDiscoveryAsset(
   }
   await removeSeededCandidate(seeded);
 }
+
+// ── ATL-212 additions ─────────────────────────────────────────────────────────
+
+/**
+ * Seeds a single `discovery_runs` row with the given `run_status`.
+ *
+ * No invocations, evidence, or candidates are created.  Because no candidate
+ * chain exists, `deriveCompletedStatus` short-circuits at hop 1 (empty
+ * invocations) and returns `"completed_zero"` for a `"completed"` run seeded
+ * this way — which is exactly what the run-scoping tests use as "Run B".
+ *
+ * For status tests that do NOT require a candidate chain (pending, running,
+ * partial, blocked, failed, completed-with-no-candidates).
+ *
+ * Cleanup: call `removeSeededRun` with the returned `runId`.
+ */
+export async function seedRunWithStatus(
+  userId: string,
+  status: "pending" | "running" | "completed" | "partial" | "blocked" | "failed",
+): Promise<{ runId: string }> {
+  const db = admin();
+  const runId = randomUUID();
+  const { error } = await db.from("discovery_runs").insert({
+    id: runId,
+    user_id: userId,
+    triggered_by: "user",
+    run_status: status,
+  } as never); // generated type does not narrow run_status to the union literal
+  if (error) throw new Error(`seedRunWithStatus(${status}): insert failed: ${error.message}`);
+  return { runId };
+}
+
+/**
+ * Removes a single `discovery_runs` row seeded by `seedRunWithStatus` (which
+ * creates no child rows, so no FK ordering is required).
+ *
+ * Safe to call with `undefined` when setup failed before the seed completed.
+ */
+export async function removeSeededRun(runId: string | undefined): Promise<void> {
+  if (!runId) return;
+  await admin().from("discovery_runs").delete().eq("id", runId);
+}
+
+/**
+ * Seeds the full chain (run → invocation → evidence → candidate) and then
+ * updates the run's `run_status` to `"completed"`.
+ *
+ * Used to verify that DB `"completed"` + candidates from THAT run → UI
+ * `"completed_candidates"` (3-hop derivation).  The candidate status is
+ * `"pending"` (awaiting review) — that status is irrelevant to the derivation,
+ * which counts all candidates regardless of their review status.
+ *
+ * Cleanup: call `removeSeededCandidate` with the returned object (same shape
+ * as `seedDiscoveryCandidate`).
+ */
+export async function seedCompletedRunWithCandidate(userId: string): Promise<SeededCandidate> {
+  // Create the full chain via the existing helper (run_status defaults to "pending").
+  const chain = await seedDiscoveryCandidate(userId, "pending");
+
+  // Promote the run to "completed".
+  const { error } = await admin()
+    .from("discovery_runs")
+    .update({ run_status: "completed" } as never)
+    .eq("id", chain.runId);
+  if (error)
+    throw new Error(`seedCompletedRunWithCandidate: status update failed: ${error.message}`);
+
+  return chain;
+}

@@ -1,5 +1,5 @@
 /**
- * Public API for the discovery feature (ATL-210).
+ * Public API for the discovery feature (ATL-210, ATL-211, ATL-212).
  */
 
 // View models
@@ -8,6 +8,7 @@ export type {
   DiscoveryConsentState,
   DiscoveryAcknowledgmentView,
   DiscoveryRunStatus,
+  DiscoveryRunView,
   DiscoveryConsentActionState,
   DisclosureAcknowledgmentActionState,
 } from "./discovery-view";

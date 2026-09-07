@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { APP_NAME } from "@/config/app";
+import { APP_NAME, type NavKey } from "@/config/app";
 import { FOOTER_NAV_ITEMS, PRIMARY_NAV_ITEMS, type NavItem } from "@/config/navigation";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -57,18 +57,32 @@ interface SidebarProps {
    * not outlive the page.
    */
   onCollapsedChange?: (collapsed: boolean) => void | Promise<void>;
+
+  /**
+   * Runtime badge counts for primary nav items (ATL-212).
+   *
+   * A plain serialisable object passed from the Server Component layout.
+   * Only nav keys with a positive count render a badge chip in expanded state.
+   */
+  badgeCounts?: Partial<Record<NavKey, number>>;
 }
 
 function NavLink({
   item,
   collapsed,
   active,
+  count,
 }: {
   item: NavItem;
   collapsed: boolean;
   active: boolean;
+  /** Optional runtime badge count (ATL-212). Renders when > 0. */
+  count?: number;
 }) {
   const Icon = item.icon;
+
+  // Cap display at 9+ to match the notifications-panel convention (frontend §4.1).
+  const badgeLabel = count !== undefined && count > 0 ? (count > 9 ? "9+" : String(count)) : null;
 
   const link = (
     <Link
@@ -93,6 +107,23 @@ function NavLink({
           The tooltip below is therefore an addition for sighted users, never the
           only route to the label (frontend §19: hover enhances, never gates). */}
       <span className={cn(collapsed ? "sr-only" : "sr-only lg:not-sr-only")}>{item.label}</span>
+      {/* Badge: pending-candidate count (ATL-212). Only shown when there is at
+          least one pending item. Screen-reader users get the label via
+          aria-label; sighted users get the visual chip. The badge is hidden in
+          collapsed/rail state — the tooltip carries the label there. */}
+      {badgeLabel !== null && (
+        <span
+          aria-label={`${String(count)} pending`}
+          data-slot="nav-badge"
+          className={cn(
+            "ml-auto grid min-w-[1.25rem] place-items-center rounded-full px-1",
+            "bg-accent text-[0.625rem] leading-5 font-semibold text-white",
+            collapsed ? "hidden" : "hidden lg:grid",
+          )}
+        >
+          {badgeLabel}
+        </span>
+      )}
     </Link>
   );
 
@@ -179,7 +210,11 @@ function CollapseControl({
   );
 }
 
-export function Sidebar({ defaultCollapsed = false, onCollapsedChange }: SidebarProps) {
+export function Sidebar({
+  defaultCollapsed = false,
+  onCollapsedChange,
+  badgeCounts,
+}: SidebarProps) {
   const pathname = usePathname();
   const navId = React.useId();
 
@@ -274,7 +309,13 @@ export function Sidebar({ defaultCollapsed = false, onCollapsedChange }: Sidebar
         {/* 3–8. Primary destinations. */}
         <ul className="flex flex-col gap-1 px-3">
           {PRIMARY_NAV_ITEMS.map((item) => (
-            <NavLink key={item.key} item={item} collapsed={collapsed} active={isActive(item)} />
+            <NavLink
+              key={item.key}
+              item={item}
+              collapsed={collapsed}
+              active={isActive(item)}
+              {...(badgeCounts?.[item.key] !== undefined ? { count: badgeCounts[item.key] } : {})}
+            />
           ))}
         </ul>
 

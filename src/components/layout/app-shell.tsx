@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { NavKey } from "@/config/app";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
 
@@ -26,12 +27,21 @@ export interface AppShellProps {
   sidebarCollapsed?: boolean;
   /** Server Action persisting the preference (ATL-006), injected by the layout. */
   onSidebarCollapsedChange?: (collapsed: boolean) => void | Promise<void>;
+  /**
+   * Runtime badge counts for primary nav items (ATL-212).
+   *
+   * A plain serialisable object — safe to cross the RSC→Client boundary.
+   * Only nav keys with a positive count receive a badge; zero and absent keys
+   * render no badge. Passed through to `Sidebar` unchanged.
+   */
+  badgeCounts?: Partial<Record<NavKey, number>>;
 }
 
 export function AppShell({
   children,
   sidebarCollapsed = false,
   onSidebarCollapsedChange,
+  badgeCounts,
 }: AppShellProps) {
   return (
     <div data-slot="app-shell" className="flex min-h-dvh">
@@ -43,6 +53,7 @@ export function AppShell({
         <Sidebar
           defaultCollapsed={sidebarCollapsed}
           {...(onSidebarCollapsedChange ? { onCollapsedChange: onSidebarCollapsedChange } : {})}
+          {...(badgeCounts ? { badgeCounts } : {})}
         />
       </div>
 

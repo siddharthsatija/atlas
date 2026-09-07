@@ -1,5 +1,5 @@
 /**
- * View models for the discovery feature (ATL-210).
+ * View models for the discovery feature (ATL-210, ATL-212).
  *
  * Declared in the feature rather than imported from `server/` or `app/` —
  * a feature does not reach into those layers. The server page resolves data
@@ -14,6 +14,10 @@
 
 import type { DiscoveryConsentType } from "@/lib/consent";
 import type { DisclosureClass } from "@/lib/discovery/types";
+
+// Re-export so existing callers that import these from the feature layer
+// continue to work without change (ATL-212).
+export type { DiscoveryRunStatus, DiscoveryRunView } from "@/lib/discovery/types";
 
 /**
  * One active discovery provider as the consent UI renders it.
@@ -47,12 +51,6 @@ export interface DiscoveryAcknowledgmentView {
   /** ISO timestamp when the acknowledgment was recorded. */
   readonly acknowledgedAt: string;
 }
-
-/**
- * The six possible states of one discovery run (ATL-210 §3, ADR-008 §10).
- */
-export type DiscoveryRunStatus =
-  "running" | "completed_candidates" | "completed_zero" | "partial" | "blocked" | "failed";
 
 /**
  * Result shape for a grant/revoke consent action.

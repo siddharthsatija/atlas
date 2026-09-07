@@ -376,4 +376,32 @@ export class DiscoveryCandidateRepository {
     }
     return result;
   }
+
+  /**
+   * Returns the count of candidates in `pending` status for the given user
+   * (ATL-212).
+   *
+   * Used by the Discover nav badge to show how many candidates await a
+   * first-time adjudication decision. `dismissed` and `not_sure` candidates
+   * are deliberately excluded — they have already received a user decision and
+   * should not inflate the badge.
+   *
+   * A single COUNT query rather than fetching rows: the badge needs only a
+   * number, not the candidate data itself.
+   *
+   * The query is scoped by `user_id` — the service-role client bypasses RLS
+   * so ownership must be filtered here.
+   *
+   * Throws `DiscoveryCandidateStoreError` on any genuine database error.
+   */
+  async countPending(userId: string): Promise<number> {
+    const { count, error } = await this.db
+      .from("discovery_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("status", "pending");
+
+    if (error) throw new DiscoveryCandidateStoreError("countPending");
+    return count ?? 0;
+  }
 }

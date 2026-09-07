@@ -1,6 +1,7 @@
 import {
   ArchiveIcon,
   ClockIcon,
+  CompassIcon,
   LayoutDashboardIcon,
   SettingsIcon,
   ShieldAlertIcon,
@@ -11,7 +12,7 @@ import {
 import { NAV_ORDER, type NavKey } from "./app";
 
 /**
- * Primary navigation definitions (ATL-005).
+ * Primary navigation definitions (ATL-005, ATL-212).
  *
  * Ordering is NOT defined here — it comes from `NAV_ORDER` in `./app`, which
  * encodes PRD §12 and frontend spec §3. Keeping one ordering source prevents the
@@ -31,6 +32,8 @@ export interface NavItem {
 
 const NAV_DEFINITIONS: Record<NavKey, Omit<NavItem, "key">> = {
   overview: { label: "Overview", href: "/overview", icon: LayoutDashboardIcon },
+  /** ATL-212: Discover surface (PRD §12 position 2). */
+  discover: { label: "Discover", href: "/discover", icon: CompassIcon },
   assets: { label: "Digital Assets", href: "/assets", icon: LayersIcon },
   insights: { label: "Privacy Insights", href: "/insights", icon: ShieldAlertIcon },
   requests: { label: "Requests", href: "/requests", icon: SendIcon },
@@ -39,7 +42,7 @@ const NAV_DEFINITIONS: Record<NavKey, Omit<NavItem, "key">> = {
   settings: { label: "Settings", href: "/settings", icon: SettingsIcon, footer: true },
 };
 
-/** All items in the order defined by frontend §3. */
+/** All items in the order defined by frontend §3 / PRD §12. */
 export const NAV_ITEMS: NavItem[] = NAV_ORDER.map((key) => ({ key, ...NAV_DEFINITIONS[key] }));
 
 /** Items 3–8: the main navigation list. */

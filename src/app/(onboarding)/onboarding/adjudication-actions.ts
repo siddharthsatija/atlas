@@ -26,6 +26,12 @@
  * Successful actions call `revalidatePath("/onboarding")` so the RSC page
  * re-fetches `listForReview`. Confirmed and rejected candidates disappear from
  * the list; dismissed and not_sure candidates remain, letting the user skip.
+ *
+ * ATL-212: all four actions also call `revalidatePath("/discover")` because
+ * every adjudication outcome moves the candidate out of `pending` status,
+ * which reduces the Discover nav badge count. The `/discover` path is
+ * revalidated unconditionally — the user may not be on that route, but the
+ * cache must be fresh for when they navigate there.
  */
 
 import { revalidatePath } from "next/cache";
@@ -117,6 +123,7 @@ export async function confirmCandidateAction(
       accountIdentifier: null,
     });
     revalidatePath("/assets");
+    revalidatePath("/discover");
     return ok(prev, "confirmed", result.assetId);
   } catch {
     return fail(prev, "unavailable");
@@ -147,6 +154,7 @@ export async function rejectCandidateAction(
     const service = CandidateAdjudicationService.create();
     await service.reject(user.id, candidateId);
     revalidatePath("/onboarding");
+    revalidatePath("/discover");
     return ok(prev, "rejected");
   } catch (err) {
     const code = (err as { code?: string }).code;
@@ -178,6 +186,7 @@ export async function dismissCandidateAction(
     const service = CandidateAdjudicationService.create();
     await service.dismiss(user.id, candidateId);
     revalidatePath("/onboarding");
+    revalidatePath("/discover");
     return ok(prev, "dismissed");
   } catch (err) {
     const code = (err as { code?: string }).code;
@@ -210,6 +219,7 @@ export async function notSureCandidateAction(
     const service = CandidateAdjudicationService.create();
     await service.notSure(user.id, candidateId);
     revalidatePath("/onboarding");
+    revalidatePath("/discover");
     return ok(prev, "not_sure");
   } catch (err) {
     const code = (err as { code?: string }).code;

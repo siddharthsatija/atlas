@@ -26,3 +26,29 @@
  * §3, check 8) — the hash prefix does not constitute identifying transmission.
  */
 export type DisclosureClass = "hashed_query" | "identifying_lookup" | "broker_query";
+
+/**
+ * The six possible states of one discovery run (ATL-210 §3, ADR-008 §10).
+ *
+ * Declared here (lib layer) so it can be used by both the feature layer
+ * (discovery-view.ts, discovery-run-status.tsx) and the server repository
+ * layer (discovery-runs-repository.ts) without a layer-boundary violation.
+ */
+export type DiscoveryRunStatus =
+  "running" | "completed_candidates" | "completed_zero" | "partial" | "blocked" | "failed";
+
+/**
+ * Display-safe view of one discovery run (ATL-212).
+ *
+ * Declared in lib/ (not features/) so `DiscoveryRunsRepository` can import
+ * it without a layer-boundary violation. `discovery-view.ts` re-exports it
+ * for callers that import from the feature layer.
+ */
+export interface DiscoveryRunView {
+  /** discovery_runs.id */
+  readonly id: string;
+  /** Aggregated run status (ATL-210 §3, ADR-008 §10). */
+  readonly status: DiscoveryRunStatus;
+  /** ISO timestamp when the run row was created. */
+  readonly createdAt: string;
+}

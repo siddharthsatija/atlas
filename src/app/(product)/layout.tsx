@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { AppShell } from "@/components/layout/app-shell";
 import { requireVerifiedUser } from "@/server/auth/require-user";
 import { OnboardingService } from "@/server/onboarding/onboarding-service";
+import { DiscoveryCandidateRepository } from "@/server/repositories/discovery-candidate-repository";
+import { createServiceRoleClient } from "@/server/db/service-role-client";
 import { setSidebarCollapsed } from "./actions";
 import {
   SIDEBAR_COLLAPSED_COOKIE,
@@ -69,8 +71,29 @@ export default async function ProductLayout({ children }: { children: ReactNode 
   const store = await cookies();
   const sidebarCollapsed = parseSidebarCollapsed(store.get(SIDEBAR_COLLAPSED_COOKIE)?.value);
 
+  /**
+   * Pending-candidate count for the Discover nav badge (ATL-212).
+   *
+   * Fetched here (layout level) so every product surface reflects the current
+   * count on each navigation. A failed count is non-fatal: the badge simply
+   * omits rather than crashing the shell. No automatic polling — the badge
+   * revalidates when adjudication Server Actions call revalidatePath (ATL-212).
+   */
+  let pendingCandidateCount = 0;
+  try {
+    const db = createServiceRoleClient();
+    const candidateRepo = new DiscoveryCandidateRepository(db);
+    pendingCandidateCount = await candidateRepo.countPending(user.id);
+  } catch {
+    // Non-fatal: badge shows 0 rather than crashing the authenticated shell.
+  }
+
   return (
-    <AppShell sidebarCollapsed={sidebarCollapsed} onSidebarCollapsedChange={setSidebarCollapsed}>
+    <AppShell
+      sidebarCollapsed={sidebarCollapsed}
+      onSidebarCollapsedChange={setSidebarCollapsed}
+      {...(pendingCandidateCount > 0 ? { badgeCounts: { discover: pendingCandidateCount } } : {})}
+    >
       {children}
     </AppShell>
   );
