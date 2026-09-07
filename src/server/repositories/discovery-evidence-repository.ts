@@ -51,6 +51,23 @@ export class DiscoveryEvidenceStoreError extends Error {
   }
 }
 
+/**
+ * One aggregator-attributed evidence row surfaced for review (ATL-211).
+ *
+ * These rows are informational only — no candidate row exists for them and
+ * no action buttons are shown. Aggregator attribution means the finding was
+ * inferred from a data-broker rather than a first-party provider query.
+ */
+export interface AggregatorEvidenceItem {
+  /** discovery_evidence.id */
+  readonly id: string;
+  readonly sourceIdentifier: string;
+  readonly evidenceType: string;
+  readonly evidenceSummary: string;
+  readonly providerClass: string;
+  readonly createdAt: string;
+}
+
 export class DiscoveryEvidenceRepository {
   private readonly db: SupabaseClient<Database>;
 
@@ -118,6 +135,35 @@ export class DiscoveryEvidenceRepository {
       .upsert(payload, { ignoreDuplicates: true });
 
     if (error) throw new DiscoveryEvidenceStoreError("insert");
+  }
+
+  /**
+   * Returns all aggregator-attributed evidence rows for the given user (ATL-211).
+   *
+   * These are evidence rows where `is_aggregator_attributed = true` — findings
+   * inferred from a data-broker rather than a direct provider query. They are
+   * shown without action buttons: no candidate row exists so no adjudication
+   * is possible at this level.
+   *
+   * Throws `DiscoveryEvidenceStoreError` on any genuine database error.
+   */
+  async listAggregatorAttributed(userId: string): Promise<AggregatorEvidenceItem[]> {
+    const { data, error } = await this.db
+      .from("discovery_evidence")
+      .select("id, source_identifier, evidence_type, evidence_summary, provider_class, created_at")
+      .eq("user_id", userId)
+      .eq("is_aggregator_attributed", true);
+
+    if (error) throw new DiscoveryEvidenceStoreError("listAggregatorAttributed");
+
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      sourceIdentifier: row.source_identifier,
+      evidenceType: row.evidence_type,
+      evidenceSummary: row.evidence_summary,
+      providerClass: row.provider_class,
+      createdAt: row.created_at,
+    }));
   }
 }
 

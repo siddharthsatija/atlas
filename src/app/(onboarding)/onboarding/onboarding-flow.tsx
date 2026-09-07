@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { ASSET_CATEGORIES } from "@/lib/assets/categories";
@@ -35,6 +35,14 @@ import {
 } from "./identity-profile-actions";
 import { INITIAL_COMPLETE_STATE } from "./form-state";
 import { cn } from "@/lib/utils";
+import { CandidateReviewSection } from "@/features/discovery";
+import type { CandidateReviewItem, AggregatorEvidenceItem } from "@/features/discovery";
+import {
+  confirmCandidateAction,
+  rejectCandidateAction,
+  dismissCandidateAction,
+  notSureCandidateAction,
+} from "./adjudication-actions";
 
 /**
  * The onboarding flow (ATL-016, frontend §17).
@@ -127,6 +135,23 @@ export interface OnboardingFlowProps {
   activeDiscoveryProviders?: readonly DiscoveryProviderView[];
   /** Consent state by consent type, for each active provider. */
   discoveryConsentStateByType?: Record<string, DiscoveryConsentState>;
+
+  // ---- ATL-211: candidate adjudication step props --------------------------
+
+  /**
+   * Reviewable discovery candidates (pending + dismissed + not_sure).
+   *
+   * Fetched server-side by `page.tsx` via `DiscoveryCandidateRepository.listForReview`.
+   * An empty array means no candidates exist — the step auto-advances.
+   * Serialisable: plain objects only, no Date or Buffer.
+   */
+  reviewableCandidates?: readonly CandidateReviewItem[];
+  /**
+   * Aggregator-attributed evidence rows (no action buttons).
+   *
+   * Fetched server-side via `DiscoveryEvidenceRepository.listAggregatorAttributed`.
+   */
+  aggregatorEvidence?: readonly AggregatorEvidenceItem[];
 }
 
 export function OnboardingFlow({
@@ -137,6 +162,8 @@ export function OnboardingFlow({
   isUpgradeMode = false,
   activeDiscoveryProviders = [],
   discoveryConsentStateByType = {},
+  reviewableCandidates = [],
+  aggregatorEvidence = [],
 }: OnboardingFlowProps = {}) {
   const resumed = initialState ?? INITIAL_ONBOARDING_STATE;
 
@@ -204,6 +231,59 @@ export function OnboardingFlow({
     const next = nextStep(step);
     if (next) goToStep(next);
   };
+
+  /**
+   * Set to `true` synchronously when the user submits any confirm form in the
+   * `candidate_review` step. Guards the auto-advance `useEffect` so the step
+   * does not jump to `ready` while a confirmed CandidateCard is still visible.
+   *
+   * A `useRef` rather than `useState` is required here. React 19 form actions
+   * wrap the whole submission in `startTransition`, which makes a corresponding
+   * `setState` call a transition-priority (deferred) update. The RSC refresh
+   * that delivers `reviewableCandidates: []` can commit as a separate
+   * higher-priority update before the transition batch commits, so a `useState`
+   * guard would still read `false` when the auto-advance effect fires. A ref is
+   * written synchronously in `onSubmit` (before the SA round-trip begins) and
+   * its `.current` is always visible to any subsequent effect run, regardless
+   * of React's render scheduling.
+   *
+   * The ref resets to `false` on a fresh page render (initial value), so the
+   * normal auto-advance is unaffected when `listForReview` genuinely returns
+   * empty on first paint.
+   */
+  const hasConfirmedAttemptRef = useRef(false);
+
+  /**
+   * Auto-advance past `candidate_review` when there is nothing to review.
+   *
+   * Fires once on mount when the lists are already empty — a new user with no
+   * discovery providers configured will never see the step. Also fires after
+   * a successful Server Action revalidates the page and re-renders with
+   * `reviewableCandidates: []` and `aggregatorEvidence: []`.
+   *
+   * Keyed to the lists, NOT to `activeDiscoveryProviders`: the step is keyed
+   * to data, not to provider configuration (ATL-211 confirmed product decision).
+   *
+   * `reviewableCandidates` includes pending + dismissed + not_sure, so a user
+   * who has only dismissed or not_sure'd candidates is NOT auto-advanced — they
+   * remain on the step and can still see/interact with those entries.
+   */
+  useEffect(() => {
+    if (
+      step === "candidate_review" &&
+      reviewableCandidates.length === 0 &&
+      aggregatorEvidence.length === 0 &&
+      !hasConfirmedAttemptRef.current
+    ) {
+      advance();
+    }
+    // advance is a stable closure; including it causes an infinite loop.
+    // hasConfirmedAttemptRef is intentionally omitted: refs are not reactive
+    // values and must not be in the deps array. The ref is read synchronously
+    // in the effect body and is always current — its write in onSubmit happens
+    // before the SA round-trip and therefore before this effect can fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, reviewableCandidates.length, aggregatorEvidence.length]);
 
   return (
     <div>
@@ -288,6 +368,32 @@ export function OnboardingFlow({
               }
             />
           </CardContent>
+        )}
+
+        {/*
+          ATL-211: candidate adjudication step.
+
+          The flow imports the Server Actions directly (it is in `app/`) and
+          passes action factories to CandidateReviewSection, which is in
+          `features/`. The factories bind the candidateId inside the section,
+          matching the grantActionFactory pattern in DiscoveryConsentSection.
+
+          The outer navigation (Back / Skip / Continue) is shown for this step
+          because the step is skippable. The Skip button calls advance() via
+          the outer nav's isSkippable() check.
+        */}
+        {step === "candidate_review" && (
+          <CandidateReviewSection
+            candidates={reviewableCandidates}
+            aggregatorEvidence={aggregatorEvidence}
+            confirmActionFactory={(candidateId) => confirmCandidateAction.bind(null, candidateId)}
+            rejectActionFactory={(candidateId) => rejectCandidateAction.bind(null, candidateId)}
+            dismissActionFactory={(candidateId) => dismissCandidateAction.bind(null, candidateId)}
+            notSureActionFactory={(candidateId) => notSureCandidateAction.bind(null, candidateId)}
+            onFirstConfirmedAttempt={() => {
+              hasConfirmedAttemptRef.current = true;
+            }}
+          />
         )}
 
         {step === "ready" && (

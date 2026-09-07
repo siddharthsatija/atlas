@@ -45,3 +45,21 @@ export type {
   DiscoveryRunStatusBadgeProps,
   DiscoveryRunStatusRowProps,
 } from "./discovery-run-status";
+
+// ATL-211: candidate adjudication
+export type {
+  CandidateReviewItem,
+  AggregatorEvidenceItem,
+  AdjudicationActionState,
+  AdjudicationOutcome,
+} from "./candidate-view";
+export { INITIAL_ADJUDICATION_ACTION_STATE } from "./candidate-view";
+
+export { CandidateCard } from "./candidate-card";
+export type { CandidateCardProps, BoundAdjudicationAction } from "./candidate-card";
+
+export { CandidateReviewSection } from "./candidate-review-section";
+export type {
+  CandidateReviewSectionProps,
+  AdjudicationActionFactory,
+} from "./candidate-review-section";

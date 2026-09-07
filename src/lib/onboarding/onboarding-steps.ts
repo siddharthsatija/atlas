@@ -27,6 +27,7 @@ export const ONBOARDING_STEPS = [
   "categories",
   "starting_point",
   "identity_profile",
+  "candidate_review",
   "ready",
 ] as const;
 
@@ -53,6 +54,7 @@ export const SKIPPABLE_STEPS: readonly OnboardingStep[] = [
   "privacy_goal",
   "categories",
   "starting_point",
+  "candidate_review",
 ];
 
 export function isSkippable(step: OnboardingStep): boolean {

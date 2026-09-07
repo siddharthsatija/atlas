@@ -29,6 +29,7 @@ describe("step order", () => {
       "categories",
       "starting_point",
       "identity_profile",
+      "candidate_review",
       "ready",
     ]);
   });
@@ -60,7 +61,12 @@ describe("step order", () => {
 describe("skipping", () => {
   it("allows skipping every step that collects a preference", () => {
     // FR-02 "allow skipping optional steps"; §17 "skip where safe".
-    expect(SKIPPABLE_STEPS).toEqual(["privacy_goal", "categories", "starting_point"]);
+    expect(SKIPPABLE_STEPS).toEqual([
+      "privacy_goal",
+      "categories",
+      "starting_point",
+      "candidate_review",
+    ]);
   });
 
   it("does not offer skip on the introduction or the completion step", () => {
@@ -72,7 +78,7 @@ describe("skipping", () => {
 
   it("preference-collection steps are all skippable; identity_profile is not", () => {
     // ATL-209: identity_profile is mandatory and must NOT appear in SKIPPABLE_STEPS.
-    // Preference steps (privacy_goal, categories, starting_point) remain optional.
+    // Preference steps (privacy_goal, categories, starting_point, candidate_review) remain optional.
     const preferenceSteps = ONBOARDING_STEPS.filter(
       (step) => step !== "introduction" && step !== "identity_profile" && step !== "ready",
     );

@@ -225,7 +225,7 @@ export class CandidateAdjudicationService {
     // 3. Rejection key + fingerprint — key is zeroized in the finally block.
     let rejectionKey: RejectionKey | null = null;
     try {
-      rejectionKey = await this.rejectionKeys.getRejectionKey(userId);
+      rejectionKey = await this.rejectionKeys.getOrCreate(userId);
     } catch (e) {
       if (e instanceof CryptoError && e.code === "key_unavailable") {
         throw new AdjudicationError("rejection_key_unavailable");
@@ -305,7 +305,7 @@ export class CandidateAdjudicationService {
 
     let rejectionKey: RejectionKey | null = null;
     try {
-      rejectionKey = await this.rejectionKeys.getRejectionKey(userId);
+      rejectionKey = await this.rejectionKeys.getOrCreate(userId);
     } catch (e) {
       if (e instanceof CryptoError && e.code === "key_unavailable") {
         throw new AdjudicationError("rejection_key_unavailable");

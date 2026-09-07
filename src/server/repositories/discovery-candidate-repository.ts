@@ -57,6 +57,35 @@ export interface CandidateDetail {
   readonly assetId: string | null;
 }
 
+/**
+ * One candidate surfaced for user review (ATL-211).
+ *
+ * Populated from `discovery_candidates` joined with `discovery_evidence`.
+ * Returns `pending`, `dismissed`, and `not_sure` candidates — `confirmed` and
+ * `rejected` are excluded. The `status` field drives UI grouping client-side.
+ *
+ * ADR-008 §8: no user_id, candidate_id, or evidence values in error messages.
+ */
+export interface CandidateReviewItem {
+  /** discovery_candidates.id */
+  readonly id: string;
+  /** Provider-normalised source key; used as the service name on the card. */
+  readonly sourceIdentifier: string;
+  /** Evidence classification (e.g. 'breach', 'public_record'). */
+  readonly evidenceType: string;
+  /** Human-readable summary of the evidence. */
+  readonly evidenceSummary: string;
+  /** Provider class that surfaced this evidence. */
+  readonly providerClass: string;
+  /**
+   * Persisted adjudication status.
+   *
+   * One of `pending`, `dismissed`, or `not_sure`. Drives card variant and
+   * section grouping in `CandidateReviewSection` (ATL-211).
+   */
+  readonly status: "pending" | "dismissed" | "not_sure";
+}
+
 /** Parameters forwarded verbatim to the `confirm_discovery_candidate` RPC (ATL-208). */
 export interface ConfirmCandidateParams {
   assetId: string;
@@ -295,5 +324,56 @@ export class DiscoveryCandidateRepository {
       .eq("status", "dismissed");
 
     if (error) throw new DiscoveryCandidateStoreError("transitionDismissedToPending");
+  }
+  /**
+   * Returns `pending`, `dismissed`, and `not_sure` candidates for the given
+   * user, with evidence display fields joined from `discovery_evidence` (ATL-211).
+   *
+   * `confirmed` and `rejected` candidates are excluded — they no longer need
+   * review. `dismissed` and `not_sure` remain visible so the user can revisit
+   * their earlier decision without leaving the onboarding step.
+   *
+   * Two queries with an in-list rather than a Supabase FK join:
+   * - Avoids dependence on auto-detected PostgREST relationship names.
+   * - Still O(1) round-trips — candidates are scarce per user.
+   *
+   * Throws `DiscoveryCandidateStoreError` on any genuine database error.
+   */
+  async listForReview(userId: string): Promise<CandidateReviewItem[]> {
+    const { data: candidateRows, error: candidateError } = await this.db
+      .from("discovery_candidates")
+      .select("id, evidence_id, status")
+      .eq("user_id", userId)
+      .in("status", ["pending", "dismissed", "not_sure"]);
+
+    if (candidateError) throw new DiscoveryCandidateStoreError("listForReview");
+    if (!candidateRows || candidateRows.length === 0) return [];
+
+    const evidenceIds = candidateRows.map((c) => c.evidence_id);
+
+    const { data: evidenceRows, error: evidenceError } = await this.db
+      .from("discovery_evidence")
+      .select("id, source_identifier, evidence_type, evidence_summary, provider_class")
+      .eq("user_id", userId)
+      .in("id", evidenceIds);
+
+    if (evidenceError) throw new DiscoveryCandidateStoreError("listForReview_evidence");
+
+    const evidenceMap = new Map((evidenceRows ?? []).map((e) => [e.id, e]));
+
+    const result: CandidateReviewItem[] = [];
+    for (const candidate of candidateRows) {
+      const evidence = evidenceMap.get(candidate.evidence_id);
+      if (!evidence) continue; // orphaned candidate — skip silently
+      result.push({
+        id: candidate.id,
+        sourceIdentifier: evidence.source_identifier,
+        evidenceType: evidence.evidence_type,
+        evidenceSummary: evidence.evidence_summary,
+        providerClass: evidence.provider_class,
+        status: candidate.status as "pending" | "dismissed" | "not_sure",
+      });
+    }
+    return result;
   }
 }

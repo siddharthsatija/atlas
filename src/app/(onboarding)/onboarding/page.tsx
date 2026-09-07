@@ -8,7 +8,13 @@ import { saveOnboardingProgressAction } from "./actions";
 import { DiscoveryConsentService } from "@/server/discovery/discovery-consent-service";
 import { createServiceRoleClient } from "@/server/db/service-role-client";
 import { getUiVisibleProviders } from "@/lib/discovery/discovery-provider-registry";
-import type { DiscoveryConsentState } from "@/features/discovery";
+import type {
+  DiscoveryConsentState,
+  CandidateReviewItem,
+  AggregatorEvidenceItem,
+} from "@/features/discovery";
+import { DiscoveryCandidateRepository } from "@/server/repositories/discovery-candidate-repository";
+import { DiscoveryEvidenceRepository } from "@/server/repositories/discovery-evidence-repository";
 
 /**
  * Onboarding (ATL-016, ATL-209, frontend §17, PRD §9.1).
@@ -99,6 +105,9 @@ export default async function OnboardingPage() {
       }))
     : [];
 
+  // Shared Supabase client for ATL-210 and ATL-211 server-side fetches.
+  const db = createServiceRoleClient();
+
   // ATL-210: Resolve active discovery providers and consent state.
   // Empty in ship state — activates when ATL-217 registers a provider.
   const activeDiscoveryProviders = getUiVisibleProviders();
@@ -108,7 +117,6 @@ export default async function OnboardingPage() {
 
   const discoveryConsentStateByType: Record<string, DiscoveryConsentState> = {};
   if (activeDiscoveryProviders.length > 0) {
-    const db = createServiceRoleClient();
     const discoveryService = DiscoveryConsentService.create(db);
     const consentResults = await Promise.all(
       uniqueConsentTypes.map(async (consentType) => {
@@ -126,6 +134,24 @@ export default async function OnboardingPage() {
         granted: result.granted,
         grantedAt: null,
       };
+    }
+  }
+
+  // ATL-211: Fetch reviewable candidates (pending + dismissed + not_sure) and
+  // aggregator-attributed evidence. Both queries are provider-neutral and fast:
+  // candidates are scarce per user. Errors are swallowed — a fetch failure renders
+  // the step empty rather than crashing the page, consistent with the `listMasked`
+  // pattern above.
+  let reviewableCandidates: CandidateReviewItem[] = [];
+  let aggregatorEvidence: AggregatorEvidenceItem[] = [];
+  if (!isUpgradeMode) {
+    try {
+      [reviewableCandidates, aggregatorEvidence] = await Promise.all([
+        new DiscoveryCandidateRepository(db).listForReview(user.id),
+        new DiscoveryEvidenceRepository(db).listAggregatorAttributed(user.id),
+      ]);
+    } catch {
+      // Swallow: renders empty step, user can skip.
     }
   }
 
@@ -150,6 +176,8 @@ export default async function OnboardingPage() {
       isUpgradeMode={isUpgradeMode}
       activeDiscoveryProviders={activeProviderViews}
       discoveryConsentStateByType={discoveryConsentStateByType}
+      reviewableCandidates={reviewableCandidates}
+      aggregatorEvidence={aggregatorEvidence}
     />
   );
 }

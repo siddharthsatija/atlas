@@ -44,7 +44,7 @@ describe("resuming", () => {
     render(<OnboardingFlow initialState={midway} />);
 
     expect(heading("Where do you have accounts?")).toBeInTheDocument();
-    expect(await screen.findByText("Step 3 of 6")).toBeInTheDocument();
+    expect(await screen.findByText("Step 3 of 7")).toBeInTheDocument();
   });
 
   it("restores the choices made before leaving", () => {
@@ -179,5 +179,237 @@ describe("consent is never resumed", () => {
       "startingPoint",
       "step",
     ]);
+  });
+});
+
+// ── ATL-211: candidate_review step and auto-advance ───────────────────────────
+
+vi.mock("./adjudication-actions", () => ({
+  confirmCandidateAction: vi.fn(() =>
+    Promise.resolve({ failure: null, attempt: 1, outcome: "confirmed", assetId: "asset-new" }),
+  ),
+  rejectCandidateAction: vi.fn(() =>
+    Promise.resolve({ failure: null, attempt: 1, outcome: "rejected", assetId: null }),
+  ),
+  dismissCandidateAction: vi.fn(() =>
+    Promise.resolve({ failure: null, attempt: 1, outcome: "dismissed", assetId: null }),
+  ),
+  notSureCandidateAction: vi.fn(() =>
+    Promise.resolve({ failure: null, attempt: 1, outcome: "not_sure", assetId: null }),
+  ),
+}));
+
+import type { CandidateReviewItem, AggregatorEvidenceItem } from "@/features/discovery";
+import { waitFor } from "@testing-library/react";
+
+const candidateReviewState = {
+  step: "candidate_review" as const,
+  privacyGoal: "reduce_exposure" as const,
+  categories: ["social"] as string[],
+  startingPoint: "start_fresh" as const,
+};
+
+const CANDIDATE: CandidateReviewItem = {
+  id: "cand-001",
+  sourceIdentifier: "acme-social.example",
+  evidenceType: "breach",
+  evidenceSummary: "Email found in public breach dataset.",
+  providerClass: "hibp",
+  status: "pending",
+};
+
+const AGG_ITEM: AggregatorEvidenceItem = {
+  id: "ev-001",
+  sourceIdentifier: "broker.example",
+  evidenceType: "public_record",
+  evidenceSummary: "Found in public records",
+  providerClass: "aggregator-x",
+  createdAt: "2026-09-01T00:00:00Z",
+};
+
+describe("candidate_review step — auto-advance", () => {
+  it("A: auto-advances to ready when both lists are empty", async () => {
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    // useEffect fires within act(); candidate_review immediately advances to ready.
+    await waitFor(() => {
+      expect(screen.queryByText(/Review your findings/i)).toBeNull();
+    });
+  });
+
+  it("A: auto-advanced state does not render CandidateReviewSection", async () => {
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/No accounts to review right now/i)).toBeNull();
+    });
+  });
+
+  it("B: does NOT auto-advance when reviewableCandidates is non-empty", () => {
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[CANDIDATE]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    expect(screen.getByText(/Review your findings/i)).toBeInTheDocument();
+    expect(screen.getByText("acme-social.example")).toBeInTheDocument();
+  });
+
+  it("B: renders CandidateReviewSection when candidates are present", () => {
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[CANDIDATE]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    expect(screen.getByText(/Review your findings/i)).toBeInTheDocument();
+  });
+
+  it("C: does NOT auto-advance when aggregatorEvidence is non-empty", () => {
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[]}
+        aggregatorEvidence={[AGG_ITEM]}
+      />,
+    );
+    expect(screen.getByText(/Review your findings/i)).toBeInTheDocument();
+    expect(screen.getByText("broker.example")).toBeInTheDocument();
+  });
+
+  it("D: does NOT auto-advance when both lists are non-empty", () => {
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[CANDIDATE]}
+        aggregatorEvidence={[AGG_ITEM]}
+      />,
+    );
+    expect(screen.getByText(/Review your findings/i)).toBeInTheDocument();
+  });
+
+  it("E: candidate_review is skippable via Skip button", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[CANDIDATE]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /Skip/i }));
+    // After skip, candidate_review is no longer shown — moved to ready.
+    await waitFor(() => {
+      expect(screen.queryByText(/Review your findings/i)).toBeNull();
+    });
+  });
+
+  it("F: resume at candidate_review with reviewable content stays on step", () => {
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[CANDIDATE]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    // The step is not auto-advanced because candidates are present.
+    expect(screen.getByText(/Review your findings/i)).toBeInTheDocument();
+  });
+
+  it("G: resume at candidate_review with both empty lists advances safely (no loop)", async () => {
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    // After auto-advance, the step renders something other than candidate_review.
+    // If there were a loop, the component would freeze or re-render infinitely —
+    // the test completing without timeout proves no loop occurred.
+    await waitFor(() => {
+      expect(screen.queryByText(/Review your findings/i)).toBeNull();
+    });
+  });
+
+  it("H: upgrade mode does not render candidate_review even with candidates", () => {
+    render(
+      <OnboardingFlow
+        isUpgradeMode={true}
+        reviewableCandidates={[CANDIDATE]}
+        aggregatorEvidence={[AGG_ITEM]}
+      />,
+    );
+    // Upgrade mode starts at identity_profile — candidate_review never appears.
+    expect(screen.queryByText(/Review your findings/i)).toBeNull();
+  });
+
+  it("I: does NOT auto-advance when reviewableCandidates contains only dismissed items", () => {
+    const dismissed: CandidateReviewItem = { ...CANDIDATE, id: "d1", status: "dismissed" };
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[dismissed]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    // dismissed is included in reviewableCandidates; list is non-empty → stay
+    expect(screen.getByText(/Review your findings/i)).toBeInTheDocument();
+  });
+
+  it("J: does NOT auto-advance when reviewableCandidates contains only not_sure items", () => {
+    const notSure: CandidateReviewItem = { ...CANDIDATE, id: "n1", status: "not_sure" };
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[notSure]}
+        aggregatorEvidence={[]}
+      />,
+    );
+    // not_sure is included in reviewableCandidates; list is non-empty → stay
+    expect(screen.getByText(/Review your findings/i)).toBeInTheDocument();
+  });
+
+  it("no provider-registry condition controls auto-advance (only list lengths)", async () => {
+    // Render with empty providers but empty lists — should auto-advance.
+    render(
+      <OnboardingFlow
+        initialState={candidateReviewState}
+        reviewableCandidates={[]}
+        aggregatorEvidence={[]}
+        activeDiscoveryProviders={[]}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Review your findings/i)).toBeNull();
+    });
+  });
+
+  it("progress shows 7 total steps when a full step count is rendered", async () => {
+    // Verifies step count is 7 after adding candidate_review.
+    render(
+      <OnboardingFlow
+        initialState={{
+          step: "categories",
+          privacyGoal: "reduce_exposure",
+          categories: ["social"],
+          startingPoint: null,
+        }}
+      />,
+    );
+    expect(await screen.findByText("Step 3 of 7")).toBeInTheDocument();
   });
 });

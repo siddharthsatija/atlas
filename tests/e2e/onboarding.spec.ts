@@ -10,8 +10,8 @@ import { waitForConfirmationLink } from "./support/mailbox";
  * `auth.setup.ts`), and a completed user is redirected straight past the thing
  * this file exists to test.
  *
- * Covers what only a browser can show — the six steps in order, back, skip, the
- * completion redirect, and axe per step.
+ * Covers what only a browser can show — the seven steps in order, back, skip,
+ * the completion redirect, and axe per step.
  */
 
 // A fresh magic-link round trip per test, so no shared state.
@@ -51,12 +51,12 @@ async function actAndAwaitSave(page: Page, act: () => Promise<void>): Promise<vo
 }
 
 test.describe("the flow", () => {
-  test("walks all six steps and lands on the dashboard", async ({ page }) => {
+  test("walks all seven steps and lands on the dashboard", async ({ page }) => {
     await startOnboarding(page);
 
     // 1. Introduction and limitations.
     await expect(step(page, "What Atlas does")).toBeVisible();
-    await expect(page.getByText("Step 1 of 6")).toBeVisible();
+    await expect(page.getByText("Step 1 of 7")).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
 
     // 2. Privacy goal.
@@ -81,9 +81,10 @@ test.describe("the flow", () => {
     await expect(page.getByRole("heading", { name: "Your identity details" })).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
 
-    // 6. Ready.
+    // 6. candidate_review auto-skips for a fresh user with no candidates.
+    // 7. Ready.
     await expect(step(page, "You are set up")).toBeVisible();
-    await expect(page.getByText("Step 6 of 6")).toBeVisible();
+    await expect(page.getByText("Step 7 of 7")).toBeVisible();
     await page.getByRole("checkbox", { name: /Let Atlas use AI/ }).check();
     await page.getByRole("button", { name: "Go to my dashboard" }).click();
 

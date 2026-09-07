@@ -22,6 +22,8 @@ import { FindingService } from "@/server/findings/finding-service";
 import { ActivityEventRepository } from "@/server/repositories/activity-event-repository";
 import { createServiceRoleClient } from "@/server/db/service-role-client";
 import { archiveAssetAction, restoreAssetAction, summarizeAssetAction } from "./actions";
+import { DeconfirmPanel } from "./deconfirm-panel";
+import { deconfirmAssetAction } from "./deconfirm-action";
 
 /**
  * The asset detail page (ATL-034, frontend §7).
@@ -157,6 +159,25 @@ export default async function AssetDetailPage({ params }: { params: Promise<{ id
               }
             : {})}
         />
+
+        {/*
+          ATL-211: Deconfirm panel for discovery-sourced assets.
+
+          Shown only when the asset was confirmed from a discovery candidate
+          (sourceType === "discovery" AND candidateId is non-null AND not
+          soft-deleted). Lets the user reverse their earlier confirmation.
+
+          Both candidateId and assetId are server-bound here (RSC) — neither
+          value reaches FormData. The panel receives only the pre-bound action.
+        */}
+        {asset.sourceType === "discovery" &&
+          asset.candidateId !== null &&
+          asset.deletedAt === null && (
+            <DeconfirmPanel
+              deconfirmAction={deconfirmAssetAction.bind(null, asset.candidateId, asset.id)}
+              serviceName={asset.serviceName}
+            />
+          )}
 
         {/*
           ATL-054's asset-context assistant, unchanged: same subject id, same
