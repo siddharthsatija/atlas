@@ -117,7 +117,7 @@ function NavLink({
           data-slot="nav-badge"
           className={cn(
             "ml-auto grid min-w-[1.25rem] place-items-center rounded-full px-1",
-            "bg-accent text-[0.625rem] leading-5 font-semibold text-white",
+            "bg-accent text-[0.625rem] leading-5 font-semibold text-accent-foreground",
             collapsed ? "hidden" : "hidden lg:grid",
           )}
         >
