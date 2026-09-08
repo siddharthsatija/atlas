@@ -13,6 +13,8 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 export default defineConfig({
   testDir: "./tests",
   testMatch: /.*\.spec\.ts$/,
+  globalSetup: "./tests/e2e/global-setup.ts",
+  globalTeardown: "./tests/e2e/global-teardown.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -113,9 +115,22 @@ export default defineConfig({
    * allowed to be faster by testing something other than what ships.
    */
   webServer: {
-    command: "pnpm build && pnpm start",
+    /**
+     * ATL-214: capture server stdout+stderr to test-results/e2e-server.log
+     * for the privacy assertion (T5).  set -o pipefail preserves non-zero
+     * exit codes from pnpm build/start through the pipe to tee.
+     *
+     * GITHUB_API_BASE_URL points the GitHub adapter at the local stub
+     * started by globalSetup (port 3333) instead of real api.github.com.
+     */
+    command:
+      'bash -c "set -o pipefail; mkdir -p test-results && pnpm build && pnpm start 2>&1 | tee test-results/e2e-server.log"',
     url: baseURL,
     reuseExistingServer: false,
     timeout: 180_000,
+    env: {
+      /** Routes GithubAdapter.query() to the local stub (ATL-214). */
+      GITHUB_API_BASE_URL: "http://127.0.0.1:3333/users",
+    },
   },
 });

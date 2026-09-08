@@ -136,6 +136,20 @@ export const serverEnvSchema = z.object({
    * `Authorization: Bearer <token>` header on profile lookup requests only.
    */
   GITHUB_TOKEN: z.string().min(1).optional(),
+
+  /**
+   * Override base URL for GitHub Users API (ATL-214, E2E testing).
+   *
+   * When set, the GitHub adapter uses this URL instead of the hardcoded
+   * production default.  Allows E2E test suites to point the adapter at a
+   * local stub server (port 3333) rather than real GitHub.
+   *
+   * Must be absent in production; the presence of any value here redirects
+   * all identifying GitHub lookups to that origin.
+   *
+   * Never logged; never included in client bundles.
+   */
+  GITHUB_API_BASE_URL: z.url().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

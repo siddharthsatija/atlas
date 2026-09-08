@@ -40,10 +40,11 @@ function makeResponse(status: number, body?: unknown): Response {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("GithubAdapter", () => {
+  const TEST_BASE_URL = "https://api.github.com/users";
   let adapter: GithubAdapter;
 
   beforeEach(() => {
-    adapter = new GithubAdapter(undefined);
+    adapter = new GithubAdapter(undefined, TEST_BASE_URL);
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -169,7 +170,7 @@ describe("GithubAdapter", () => {
     });
 
     it("includes Authorization header when token is configured", async () => {
-      const authedAdapter = new GithubAdapter("ghp_test_token");
+      const authedAdapter = new GithubAdapter("ghp_test_token", TEST_BASE_URL);
       vi.mocked(fetch).mockResolvedValueOnce(makeResponse(200, GITHUB_PROFILE_BODY));
 
       await authedAdapter.query([USERNAME_FIELD]);

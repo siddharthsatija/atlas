@@ -145,8 +145,12 @@ async function seedEvidenceChain(
 export async function seedDiscoveryCandidate(
   userId: string,
   status: "pending" | "dismissed" | "not_sure" = "pending",
+  opts: { evidenceSummary?: string } = {},
 ): Promise<SeededCandidate> {
-  const chain = await seedEvidenceChain(userId);
+  const chain = await seedEvidenceChain(
+    userId,
+    opts.evidenceSummary !== undefined ? { evidenceSummary: opts.evidenceSummary } : {},
+  );
   const db = admin();
   const candidateId = randomUUID();
 

@@ -105,11 +105,14 @@ export class GithubAdapter implements DiscoveryProviderAdapter {
     "username",
   ]);
 
-  constructor(private readonly token: string | undefined) {}
+  constructor(
+    private readonly token: string | undefined,
+    private readonly baseUrl: string,
+  ) {}
 
-  /** Production factory. Uses `GITHUB_TOKEN` from env when present. */
+  /** Production factory. Uses GITHUB_TOKEN and GITHUB_API_BASE_URL from env when present. */
   static create(): GithubAdapter {
-    return new GithubAdapter(env.GITHUB_TOKEN);
+    return new GithubAdapter(env.GITHUB_TOKEN, env.GITHUB_API_BASE_URL ?? GITHUB_USERS_BASE);
   }
 
   async query(authorizedFields: readonly DiscoveryEligibleField[]): Promise<ProviderQueryResult> {
@@ -137,7 +140,7 @@ export class GithubAdapter implements DiscoveryProviderAdapter {
         headers["authorization"] = `Bearer ${this.token}`;
       }
       // encodeURIComponent prevents path traversal (e.g. "user/../../etc").
-      response = await fetch(`${GITHUB_USERS_BASE}/${encodeURIComponent(handle)}`, {
+      response = await fetch(`${this.baseUrl}/${encodeURIComponent(handle)}`, {
         headers,
         signal: controller.signal,
       });
