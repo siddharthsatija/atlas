@@ -29,6 +29,11 @@ Use semantic tokens rather than raw color names in components.
 
 Rules:
 
+- **Light mode is the Phase 1 default.** The application launches in light mode. Dark
+  mode is an optional capability built at the token level; it must not be treated as
+  the default or as equivalent to the system preference. The `defaultTheme` for the
+  ThemeProvider must not resolve to `"system"` while Phase 1 is the active product
+  phase.
 - Danger is reserved for destructive actions or verified critical risk.
 - Severity never relies on color alone.
 - Dark mode is supported from token level.

@@ -28,6 +28,7 @@ The recommended sequence from empty repository to production release. Ticket-lev
 | M10 | Activity, archive, search, settings      | 070, 071, 072, 073, 074, 075, 076, 077                                         | Depends on the entities and events already emitting                              |
 | M11 | Privacy operations                       | 079, 080, 081, 082, 110                                                        | Export and deletion must cover every table, so they come after the tables exist  |
 | M12 | Quality and launch                       | 088, 091, 092, 093, 094, 096, 097, 098, 099, 100                               | Completion and audit of the matrices built incrementally throughout              |
+| M13 | Discovery                                | 200, 201, 202, 203, 204, 205, 206, 207, 216, 215, 208, 209, 210, 211, 212, 217, 214 | Discovery-first pipeline; GitHub active, HIBP parked (ATL-216)  |
 
 ## Why the non-obvious orderings matter
 
@@ -50,6 +51,33 @@ The recommended sequence from empty repository to production release. Ticket-lev
 **M11 (export and deletion) near the end.** Both must cover every user-owned table. Built earlier, they need revisiting after each new table — and an incomplete deletion is a privacy defect, not a missing feature.
 
 **M12 completes rather than starts the matrices.** ATL-088 (two-user authorization) and ATL-091 (accessibility) are written incrementally with each ticket; these tickets complete and audit them. Do not defer the underlying tests to M12.
+
+**M13 (Discovery) after M12.** The full security, quality, and launch preparation
+infrastructure must exist before the discovery pipeline ships. Discovery touches
+consent, outbound data disclosure, encryption, and personal fields — all of which
+require M3 and M8 to be complete. M12 quality gates (accessibility, two-user RLS
+coverage, launch checklist) apply to the discovery surfaces as well.
+
+**ATL-216 (HIBP optional) in M13.** HIBP configuration is parked by ATL-216, which
+makes the provider optional rather than required. The GitHub adapter (ATL-217) is the
+only active provider in ACTIVE_DISCOVERY_PROVIDERS at Phase 1. HIBP infrastructure
+(including the `discovery_hashed_query` consent type) is retained and valid; activation
+is deferred, not abandoned.
+
+**ATL-214 (E2E coverage) closes M13.** Discovery-first onboarding E2E tests validate the onboarding journey and downstream candidate experience — Identity Profile construction, discovery consent, candidate adjudication — using controlled test fixtures and seeded candidates rather than triggering a real production discovery run. The tests confirm functional correctness of the discovery UI and service layers but do NOT validate real product initiation → real discovery run creation → production orchestration → provider dispatch, because that production trigger path remains unwired. HIBP is parked; the tests include no HIBP stub or consent assertions.
+
+**Known gap post-M13.** The DispatchEngine is implemented but not wired to any
+application route that triggers a real discovery run in production. This is a Phase 1
+engineering gap tracked separately; it does not invalidate M13 completion, but it must
+be resolved before Phase 1 product acceptance.
+
+**Engineering complete ≠ Phase 1 product acceptance.** M13 engineering completion means
+all tickets pass their acceptance criteria. Phase 1 product acceptance is a separate
+review conducted by the product owner and requires the production run trigger gap to be
+addressed and the full onboarding journey to be validated end to end.
+
+**Phase 2 guard.** M14 and later milestones must not begin until Phase 1 passes product
+acceptance.
 
 ## Parallelization
 

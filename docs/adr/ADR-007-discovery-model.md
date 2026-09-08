@@ -13,7 +13,7 @@ The Atlas PRD defines a manual-first user journey: users identify and add their 
 
 Atlas is being redirected toward a discovery-first model: Atlas proposes candidate digital relationships with evidence; users adjudicate those candidates rather than originating them. This ADR establishes the canonical discovery model. It does not replace the existing schema — zero tables are dropped; fifteen are kept unchanged; four are adapted with constraint and enum changes only. Approximately 85–90% of implemented code survives. The security foundation survives entirely.
 
-The manual-first pathway (users manually adding assets) remains valid alongside discovery. Discovery is an additional origin, not a replacement.
+Discovery-first is the primary Phase 1 product journey: Atlas proposes evidence-backed candidates and users adjudicate them. Manual asset addition remains available as a fallback for discovery gaps — for platforms or accounts not yet covered by an active provider — but must not be presented as a co-equal onboarding path or as the primary mechanism for users to enumerate their digital relationships. No schema changes are required: manually created assets are a valid `source_type` and continue to be fully supported by the underlying data model.
 
 This ADR governs the discovery model. PRD corrections, and the correction of any document that still reflects manual-first assumptions, follow after this document is approved. No code, migrations, or ticket changes are authorised before approval.
 
@@ -208,7 +208,8 @@ Confidence is derived at generation time and pinned to the rule version that com
 **Username enumeration**
 
 - Consent type: `discovery_identifying`.
-- Two platforms at MVP: GitHub and one non-developer platform (final selection to be confirmed before implementation begins).
+- At Phase 1: GitHub only (ATL-217, implemented and active in `ACTIVE_DISCOVERY_PROVIDERS`). A second non-developer platform has not been selected; that selection is a future decision and does **not** gate Phase 1 acceptance.
+  > **Settled for Phase 1 — not subject to reopening.** Engineers must not activate a second provider or treat the absence of a second provider as a Phase 1 blocker.
 - Operates exclusively on user-supplied handles. Atlas must never derive or guess handles from names, email local-parts, phone numbers, or any other identity signal.
 - `include_in_discovery = true` is required for a handle field to participate, even when the user explicitly supplied the handle.
 - Candidates surface at confidence ≥ medium.
@@ -216,7 +217,17 @@ Confidence is derived at generation time and pinned to the rule version that com
 **Connected email**
 
 - Deferred. Requires a go/no-go decision on CASA compliance cost (annual recurring assessment with mandatory recertification). This decision has not been made and is a prerequisite to implementation.
-- HIBP plus username enumeration constitutes the MVP discovery surface. This is settled and not subject to reopening.
+- The accepted discovery architecture supports two provider classes: hashed-query providers (HIBP breach corpus, consent type `discovery_hashed_query`) and identifying providers (username/handle enumeration, consent type `discovery_identifying`). These two classes constitute the designed MVP discovery surface. Current Phase 1 activation scope is GitHub only (identifying provider, ATL-217 implemented and active). HIBP remains parked by ATL-216 and is not part of the active Phase 1 discovery run. Neither HIBP activation nor a second username provider is required for Phase 1 product acceptance.
+
+> **HIBP activation status (ATL-216).** HIBP is currently parked: the adapter exists
+> and `discovery_hashed_query` is a valid consent infrastructure entry, but HIBP is
+> not wired into `ACTIVE_DISCOVERY_PROVIDERS` for any environment. This is a deliberate
+> Phase 1 scoping decision recorded in ATL-216 ("Make HIBP Configuration Optional"),
+> not a reversal of the strategic decision above. Parked ≠ rejected. Parking does not
+> reject or supersede the accepted HIBP discovery model. Any future activation must
+> comply with the then-current ADR-007 and ADR-008 contracts unless a later accepted
+> architectural decision supersedes them. The `discovery_hashed_query` consent type
+> must not be removed or deprecated in the interim.
 
 **Broker search**
 
@@ -284,4 +295,4 @@ Atlas must not communicate that its discovery view is comprehensive. Discovery c
 
 ---
 
-*This ADR was produced after Phase 0 decision-making (D1–D8, OQ-13) and pre-ADR conflict resolution (C1–C6). It supersedes no prior ADR in full; it introduces the discovery model as additive to the existing manual-first foundation.*
+*This ADR was produced after Phase 0 decision-making (D1–D8, OQ-13) and pre-ADR conflict resolution (C1–C6). It supersedes no prior ADR in full; it introduces the discovery model as additive to the existing manual-first foundation — that foundation describes the architectural substrate (schema, security, asset types) that discovery builds on, not the current primary UX or product model, which is discovery-first.*
