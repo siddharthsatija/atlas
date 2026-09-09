@@ -61,7 +61,36 @@ export interface DisclosureContent {
  * Do not add placeholder entries here — absence is how the fail-closed gate
  * knows to disable the acknowledgment button.
  */
-const DISCLOSURE_CONTENT_MAP: ReadonlyMap<string, DisclosureContent> = new Map();
+/**
+ * ATL-217: GitHub public-profile lookup disclosure.
+ *
+ * Content approved per ATL-217 product decision. Must stay in sync with the
+ * GitHub provider entry in `discovery-provider-registry.ts`:
+ *   disclosureClass = "identifying_lookup"
+ *   disclosureContractVersion = "v1"
+ *
+ * ADR-008 §3 elements present:
+ *   ✓ what is transmitted (username, named in dialog at render time)
+ *   ✓ to whom (GitHub, named in notice)
+ *   ✓ for what purpose (public profile match)
+ *   ✓ value leaves Atlas (transmissionStatement)
+ *   ✓ cancel option (provided by FirstDisclosureDialog, not stored here)
+ */
+const DISCLOSURE_CONTENT_MAP: ReadonlyMap<string, DisclosureContent> = new Map<
+  string,
+  DisclosureContent
+>([
+  [
+    "identifying_lookup:v1",
+    {
+      title: "Share this username with GitHub?",
+      notice:
+        "Atlas will send the username shown in this dialog to GitHub to look for a public profile that may match you.",
+      transmissionStatement:
+        "This username will leave Atlas and be sent to GitHub for this lookup. Atlas will not sign in to your GitHub account.",
+    },
+  ],
+]);
 
 /**
  * Looks up notice content for one `(disclosureClass, disclosureContractVersion)` pair.
