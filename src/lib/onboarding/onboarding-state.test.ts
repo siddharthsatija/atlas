@@ -19,7 +19,7 @@ import {
  */
 
 const complete: OnboardingState = {
-  step: "starting_point",
+  step: "ready",
   privacyGoal: "reduce_exposure",
   categories: ["social", "finance"],
   startingPoint: "demo",
@@ -97,7 +97,7 @@ describe("malformed state recovers to the nearest safe step", () => {
   it("keeps the step when only an answer is broken", () => {
     const state = parseOnboardingState({ ...complete, privacyGoal: "sell_my_data" });
 
-    expect(state.step).toBe("starting_point");
+    expect(state.step).toBe("ready");
     expect(state.privacyGoal).toBeNull();
     expect(state.categories).toEqual(["social", "finance"]);
   });
@@ -184,7 +184,7 @@ describe("isInitialOnboardingState", () => {
   });
 
   it.each([
-    ["a later step", { step: "categories" as const }],
+    ["a later step", { step: "privacy_goal" as const }],
     ["a chosen goal", { privacyGoal: "reduce_exposure" }],
     ["a chosen category", { categories: ["social"] }],
     ["a chosen starting point", { startingPoint: "own" }],

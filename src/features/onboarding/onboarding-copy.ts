@@ -31,8 +31,8 @@ export const ONBOARDING_LIMITATIONS = {
   title: "What Atlas does not do",
   items: [
     {
-      title: "It does not scan the internet for you",
-      body: "Atlas works only from what you add. It cannot find accounts you have forgotten, and it will never claim to have searched anywhere on your behalf.",
+      title: "It does not search everywhere",
+      body: "Atlas searches supported providers using only the identity signals you authorize. It does not crawl arbitrary websites, sign in to your accounts, or guarantee it has found everything.",
     },
     {
       title: "It cannot guarantee deletion",
@@ -49,14 +49,6 @@ export const ONBOARDING_STEP_COPY = {
   privacy_goal: {
     title: "What brings you here?",
     lede: "This shapes what Atlas suggests first. You can change it whenever you like.",
-  },
-  categories: {
-    title: "Where do you have accounts?",
-    lede: "Pick as many as apply, or none. This only decides where Atlas starts — nothing is added for you.",
-  },
-  starting_point: {
-    title: "How would you like to begin?",
-    lede: "Either way, you are in control of what gets added.",
   },
   /**
    * ATL-209: Identity Profile step.
@@ -84,7 +76,7 @@ export const ONBOARDING_STEP_COPY = {
   },
   ready: {
     title: "You are set up",
-    lede: "Your dashboard is empty until you add something, which is the honest starting point.",
+    lede: "Your setup is complete. Atlas uses the identity signals you authorize to search supported providers, and any evidence-backed matches will be available for you to review.",
   },
 } as const;
 

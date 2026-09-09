@@ -3,11 +3,9 @@
 import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
-import { ASSET_CATEGORIES } from "@/lib/assets/categories";
 import { INITIAL_ONBOARDING_STATE, type OnboardingState } from "@/lib/onboarding/onboarding-state";
 import {
   PRIVACY_GOALS,
-  STARTING_POINTS,
   isSkippable,
   nextStep,
   previousStep,
@@ -45,7 +43,7 @@ import {
 } from "./adjudication-actions";
 
 /**
- * The onboarding flow (ATL-016, frontend §17).
+ * The onboarding flow (ATL-016, frontend §17, Repair #2).
  *
  * A client component because the step sequence is interaction state: moving
  * between steps must not cost a round trip, and the back button should return to
@@ -64,12 +62,22 @@ import {
  * see `onboarding-state.ts` for why restoring a ticked consent box would be
  * worse than asking again.
  *
+ * ## Phase 1 primary journey (Repair #2)
+ *
+ * The `categories` and `starting_point` steps have been removed. Users are no
+ * longer asked to enumerate account categories or choose between demo and their
+ * own accounts. The `categories` and `startingPoint` fields remain in
+ * `OnboardingState` for backward-compatible parsing of stored progress rows, but
+ * the primary flow no longer reads or writes them via user interaction, and the
+ * completion form does not re-submit them.
+ *
  * ## Nothing sensitive is collected (except in identity_profile)
  *
- * Every input on steps 1–4 is a choice from a fixed set. The identity_profile
- * step (ATL-209) collects contact details — email, name, phone, address. Those
- * are handled by `IdentityProfileStep`, which manages its own field state and
- * interacts with dedicated server actions isolated from `settings/actions.ts`.
+ * Every input on step 2 (`privacy_goal`) is a choice from a fixed set. The
+ * identity_profile step (ATL-209) collects contact details — email, name, phone,
+ * address. Those are handled by `IdentityProfileStep`, which manages its own
+ * field state and interacts with dedicated server actions isolated from
+ * `settings/actions.ts`.
  *
  * ## Upgrade mode (ATL-209)
  *
@@ -81,7 +89,15 @@ import {
 
 interface Answers {
   privacyGoal: string | null;
+  /**
+   * Legacy field — retained for backward-compatible persistence of resumed state.
+   * Not collected by any primary-flow step. The completion form does not submit it.
+   */
   categories: string[];
+  /**
+   * Legacy field — retained for backward-compatible persistence of resumed state.
+   * Not collected by any primary-flow step. The completion form does not submit it.
+   */
   startingPoint: string | null;
   aiConsent: boolean;
 }
@@ -172,6 +188,8 @@ export function OnboardingFlow({
   );
   const [answers, setAnswers] = useState<Answers>({
     privacyGoal: resumed.privacyGoal,
+    // Legacy fields — initialized from resumed state for backward-compatible
+    // persistence, but never written by the primary flow's UI steps.
     categories: resumed.categories,
     startingPoint: resumed.startingPoint,
     // Never restored. ATL-016 requires this box to be unchecked and never
@@ -289,7 +307,7 @@ export function OnboardingFlow({
     <div>
       {/*
         Upgrade-mode users see only the identity_profile step and no progress
-        bar — showing step 5 of 6 for a one-step flow would confuse them.
+        bar — showing step 3 of 5 for a one-step flow would confuse them.
       */}
       {!isUpgradeMode && <OnboardingProgress step={step} />}
 
@@ -301,29 +319,6 @@ export function OnboardingFlow({
             options={PRIVACY_GOALS}
             selected={answers.privacyGoal ? [answers.privacyGoal] : []}
             onSelect={(id) => answer({ privacyGoal: id })}
-          />
-        )}
-        {step === "categories" && (
-          <ChoiceStep
-            copy={ONBOARDING_STEP_COPY.categories}
-            options={ASSET_CATEGORIES}
-            multiple
-            selected={answers.categories}
-            onSelect={(id) =>
-              answer({
-                categories: answers.categories.includes(id)
-                  ? answers.categories.filter((c) => c !== id)
-                  : [...answers.categories, id],
-              })
-            }
-          />
-        )}
-        {step === "starting_point" && (
-          <ChoiceStep
-            copy={ONBOARDING_STEP_COPY.starting_point}
-            options={STARTING_POINTS}
-            selected={answers.startingPoint ? [answers.startingPoint] : []}
-            onSelect={(id) => answer({ startingPoint: id })}
           />
         )}
 
@@ -414,7 +409,7 @@ export function OnboardingFlow({
         Hidden for `identity_profile` (IdentityProfileStep provides Continue).
 
         For `identity_profile` in the full flow (not upgrade mode), a Back
-        button is still shown so the user can revisit `starting_point`.
+        button is still shown so the user can revisit `privacy_goal`.
         In upgrade mode, there is nothing to go back to.
       */}
       {step !== "ready" && step !== "identity_profile" && (
@@ -581,11 +576,11 @@ function ChoiceStep({
 }
 
 /**
- * The final step: confirms the choices, asks for AI consent, and submits.
+ * The final step: asks for AI consent and submits.
  *
- * The answers travel as hidden inputs so the whole flow submits as one form —
- * which is also what lets the action read them without this component holding a
- * second copy of the vocabulary.
+ * The primary-flow answers travel as hidden inputs. Legacy `categories` and
+ * `startingPoint` values from old stored state are NOT re-submitted — the server
+ * action already tolerates their absence as [] / null (Repair #2).
  */
 function ReadyStep({
   answers,
@@ -611,12 +606,6 @@ function ReadyStep({
           {answers.privacyGoal && (
             <input type="hidden" name="privacyGoal" value={answers.privacyGoal} />
           )}
-          {answers.startingPoint && (
-            <input type="hidden" name="startingPoint" value={answers.startingPoint} />
-          )}
-          {answers.categories.map((category) => (
-            <input key={category} type="hidden" name="categories" value={category} />
-          ))}
 
           {/*
             Unchecked by default and never pre-selected. A pre-ticked box would

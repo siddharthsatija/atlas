@@ -23,14 +23,22 @@ const ALL_COPY = JSON.stringify({
 }).toLowerCase();
 
 describe("limitations", () => {
-  it("states that Atlas does not scan", () => {
-    // Architecture §11: findings come from the user's own records and "no
-    // internet scanning is performed or claimed".
-    const scanning = ONBOARDING_LIMITATIONS.items.find((i) =>
-      i.title.toLowerCase().includes("scan"),
+  it("states bounded discovery semantics — does not search everywhere", () => {
+    // Phase 1 contract: Atlas searches bounded supported providers using
+    // authorized identity signals — not open-ended scanning.
+    const item = ONBOARDING_LIMITATIONS.items.find((i) =>
+      i.title.toLowerCase().includes("search everywhere"),
     );
-    expect(scanning).toBeDefined();
-    expect(scanning?.body.toLowerCase()).toContain("only from what you add");
+    expect(item).toBeDefined();
+    expect(item?.body.toLowerCase()).toContain("supported providers");
+    expect(item?.body.toLowerCase()).toContain("identity signals");
+    expect(item?.body.toLowerCase()).toContain("authorize");
+    expect(item?.body.toLowerCase()).toContain("crawl arbitrary websites");
+    expect(item?.body.toLowerCase()).toContain("sign in to your accounts");
+    expect(item?.body.toLowerCase()).toContain("guarantee it has found everything");
+    // Old manual-only claims must not appear.
+    expect(item?.body.toLowerCase()).not.toContain("only from what you add");
+    expect(item?.body.toLowerCase()).not.toContain("cannot find accounts you have forgotten");
   });
 
   it("states that deletion is not guaranteed", () => {
@@ -100,7 +108,14 @@ describe("tone", () => {
     }
   });
 
-  it("is honest that the dashboard starts empty", () => {
-    expect(ONBOARDING_STEP_COPY.ready.lede.toLowerCase()).toContain("empty");
+  it("ready lede uses bounded discovery language and does not imply an empty start", () => {
+    const lede = ONBOARDING_STEP_COPY.ready.lede.toLowerCase();
+    // Must not claim the dashboard starts empty.
+    expect(lede).not.toContain("empty");
+    expect(lede).not.toContain("empty until you add something");
+    // Must communicate that setup is complete.
+    expect(lede).toContain("setup is complete");
+    // Must use bounded language around evidence-backed matches.
+    expect(lede).toContain("evidence-backed matches");
   });
 });

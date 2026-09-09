@@ -22,16 +22,19 @@ import {
  */
 
 describe("step order", () => {
-  it("matches frontend §17", () => {
+  it("matches Phase 1 primary graph (Repair #2: categories and starting_point removed)", () => {
     expect(ONBOARDING_STEPS).toEqual([
       "introduction",
       "privacy_goal",
-      "categories",
-      "starting_point",
       "identity_profile",
       "candidate_review",
       "ready",
     ]);
+  });
+
+  it("does not include the removed legacy steps", () => {
+    expect(ONBOARDING_STEPS).not.toContain("categories");
+    expect(ONBOARDING_STEPS).not.toContain("starting_point");
   });
 
   it("walks forward and back symmetrically", () => {
@@ -49,6 +52,9 @@ describe("step order", () => {
   it("numbers steps from one for the progress indicator", () => {
     expect(stepPosition("introduction")).toBe(1);
     expect(stepPosition("ready")).toBe(ONBOARDING_STEPS.length);
+    // Phase 1 graph has 5 steps.
+    expect(ONBOARDING_STEPS.length).toBe(5);
+    expect(stepPosition("ready")).toBe(5);
   });
 
   it("rejects an unknown step id", () => {
@@ -56,17 +62,19 @@ describe("step order", () => {
     expect(isOnboardingStep("privacy_goal")).toBe(true);
     expect(isOnboardingStep("step-2")).toBe(false);
   });
+
+  it("rejects removed legacy step ids", () => {
+    // categories and starting_point are no longer valid primary steps.
+    expect(isOnboardingStep("categories")).toBe(false);
+    expect(isOnboardingStep("starting_point")).toBe(false);
+  });
 });
 
 describe("skipping", () => {
-  it("allows skipping every step that collects a preference", () => {
-    // FR-02 "allow skipping optional steps"; §17 "skip where safe".
-    expect(SKIPPABLE_STEPS).toEqual([
-      "privacy_goal",
-      "categories",
-      "starting_point",
-      "candidate_review",
-    ]);
+  it("allows skipping only the two optional preference steps", () => {
+    // Phase 1: categories and starting_point removed; identity_profile is
+    // mandatory. Only privacy_goal and candidate_review remain skippable.
+    expect(SKIPPABLE_STEPS).toEqual(["privacy_goal", "candidate_review"]);
   });
 
   it("does not offer skip on the introduction or the completion step", () => {
@@ -76,14 +84,17 @@ describe("skipping", () => {
     expect(isSkippable("ready")).toBe(false);
   });
 
-  it("preference-collection steps are all skippable; identity_profile is not", () => {
-    // ATL-209: identity_profile is mandatory and must NOT appear in SKIPPABLE_STEPS.
-    // Preference steps (privacy_goal, categories, starting_point, candidate_review) remain optional.
+  it("identity_profile is mandatory and not skippable", () => {
+    // ATL-209: identity_profile must NOT appear in SKIPPABLE_STEPS.
+    expect(isSkippable("identity_profile")).toBe(false);
+  });
+
+  it("every remaining non-mandatory, non-boundary step is skippable", () => {
+    // All steps except introduction, identity_profile, and ready are skippable.
     const preferenceSteps = ONBOARDING_STEPS.filter(
       (step) => step !== "introduction" && step !== "identity_profile" && step !== "ready",
     );
     expect(preferenceSteps.every(isSkippable)).toBe(true);
-    expect(isSkippable("identity_profile")).toBe(false);
   });
 });
 
@@ -146,11 +157,23 @@ describe("asset categories", () => {
   });
 });
 
-describe("starting point", () => {
-  it("offers demo or own accounts", () => {
+describe("starting point — legacy backward-compatibility vocabulary", () => {
+  /**
+   * The `starting_point` UI step has been removed from the primary onboarding
+   * journey (OQ-03: demo mode is post-signup only). STARTING_POINTS,
+   * StartingPointId, and isStartingPoint are retained so that
+   * parseOnboardingState can safely parse stored rows written before Repair #2
+   * without discarding other valid fields.
+   *
+   * These tests confirm the vocabulary is still valid for parsing purposes.
+   * They do NOT imply the UI step should be restored.
+   */
+  it("vocabulary is retained for safe parsing of legacy stored state", () => {
     expect(STARTING_POINTS.map((s) => s.id)).toEqual(["demo", "own"]);
     expect(isStartingPoint("demo")).toBe(true);
+    expect(isStartingPoint("own")).toBe(true);
     expect(isStartingPoint("seed")).toBe(false);
+    expect(isStartingPoint("start_fresh")).toBe(false);
   });
 
   it("describes demo data as removable and labelled", () => {
@@ -159,5 +182,11 @@ describe("starting point", () => {
     const demo = STARTING_POINTS.find((s) => s.id === "demo");
     expect(demo?.hint.toLowerCase()).toContain("example");
     expect(demo?.hint.toLowerCase()).toContain("remove");
+  });
+
+  it("starting_point is not a primary onboarding step", () => {
+    // The vocabulary remains, but the step does not.
+    expect(isOnboardingStep("starting_point")).toBe(false);
+    expect(ONBOARDING_STEPS).not.toContain("starting_point");
   });
 });

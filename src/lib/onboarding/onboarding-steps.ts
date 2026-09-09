@@ -14,18 +14,20 @@
  */
 
 /**
- * Frontend §17, in order.
+ * Phase 1 primary onboarding graph (frontend §17, PRD §9.1, Repair #2).
  *
- * `identity_profile` (ATL-209) sits between `starting_point` and `ready`.
- * It is mandatory — it must NOT be added to `SKIPPABLE_STEPS`. Pre-M13 users
- * who already completed onboarding are also routed to it as a one-step upgrade
- * (they only see `identity_profile`, not the preceding steps).
+ * `categories` and `starting_point` have been removed from the primary journey:
+ * Phase 1 does not ask users to manually enumerate account categories or choose
+ * between demo and their own accounts. Discovery is the primary path.
+ *
+ * `identity_profile` (ATL-209) is mandatory — it must NOT be added to
+ * `SKIPPABLE_STEPS`. Pre-M13 users who already completed onboarding are also
+ * routed to it as a one-step upgrade (they only see `identity_profile`, not the
+ * preceding steps).
  */
 export const ONBOARDING_STEPS = [
   "introduction",
   "privacy_goal",
-  "categories",
-  "starting_point",
   "identity_profile",
   "candidate_review",
   "ready",
@@ -45,17 +47,10 @@ export function isOnboardingStep(value: string): value is OnboardingStep {
  *
  * `introduction` is not skippable because there is nothing to skip — it asks
  * nothing and carries the limitations copy the product is obliged to show.
+ * `identity_profile` is not skippable — it is mandatory (ATL-209).
  * `ready` is not skippable because it *is* the completion action.
- *
- * Everything that collects a preference is optional, so a user can reach the
- * dashboard without telling Atlas anything about themselves.
  */
-export const SKIPPABLE_STEPS: readonly OnboardingStep[] = [
-  "privacy_goal",
-  "categories",
-  "starting_point",
-  "candidate_review",
-];
+export const SKIPPABLE_STEPS: readonly OnboardingStep[] = ["privacy_goal", "candidate_review"];
 
 export function isSkippable(step: OnboardingStep): boolean {
   return SKIPPABLE_STEPS.includes(step);
@@ -119,11 +114,17 @@ export function isPrivacyGoal(value: string): value is PrivacyGoalId {
 }
 
 /**
- * What the user chooses at step 4 (§17 "Demo data or add an asset").
+ * Legacy backward-compatibility vocabulary — retained for safe parsing of
+ * stored `onboarding_state_json` rows written before Repair #2.
  *
- * ATL-016 records the choice; **ATL-018 owns the demo seed itself**. Choosing
- * `demo` here sets `profiles.demo_data_enabled`, which is the flag ATL-018 keys
- * its separation on — it does not create any demo record.
+ * The `starting_point` UI step has been removed from the primary onboarding
+ * journey (OQ-03: demo mode is post-signup only). These types and validators
+ * remain so that `parseOnboardingState` can safely recover old persisted rows
+ * without throwing or discarding other valid fields. No primary-flow code reads
+ * or writes `startingPoint` via user interaction; the Zod `.catch(null)` in
+ * `onboarding-state.ts` handles unknown or stale values gracefully.
+ *
+ * Do not render these options in the primary onboarding UI.
  */
 export const STARTING_POINTS = [
   {

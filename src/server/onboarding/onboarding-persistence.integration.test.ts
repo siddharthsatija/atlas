@@ -110,7 +110,7 @@ function createDb(): SupabaseClient<Database> {
 const saved = (): unknown => rows.get(USER)?.onboarding_state_json;
 
 const midway: OnboardingState = {
-  step: "starting_point",
+  step: "privacy_goal",
   privacyGoal: "reduce_exposure",
   categories: ["social", "finance"],
   startingPoint: "demo",
@@ -194,6 +194,11 @@ describe("malformed stored state", () => {
   });
 
   it("keeps the salvageable parts of a partly-broken row", async () => {
+    // "categories" is a legacy step ID from before Repair #2.
+    // The raw persistence boundary accepts any unknown JSON, so the seed value
+    // is intentionally untyped. On parse, z.enum(ONBOARDING_STEPS).catch() falls
+    // back to ONBOARDING_STEPS[0] ("introduction") for the now-unrecognised step,
+    // while the other valid fields are still recovered.
     seed({
       onboarding_state_json: {
         step: "categories",
@@ -204,7 +209,7 @@ describe("malformed stored state", () => {
     });
 
     expect((await profiles.find(USER))?.onboardingState).toEqual({
-      step: "categories",
+      step: "introduction",
       privacyGoal: null,
       categories: ["social"],
       startingPoint: "demo",
@@ -247,6 +252,10 @@ describe("service validation", () => {
   const service = () => new OnboardingService(db);
 
   it("stores only recognised values", async () => {
+    // The input is cast as unknown to represent a raw/legacy value at the
+    // persistence boundary. "categories" is a legacy step ID (Repair #2 removed
+    // it from the primary flow), so parseOnboardingState recovers it to the first
+    // step ("introduction") via .catch(). All other invalid values are sanitized.
     seed();
 
     await service().saveProgress(USER, {
@@ -254,10 +263,10 @@ describe("service validation", () => {
       privacyGoal: "world_domination",
       categories: ["social", "not_a_category"],
       startingPoint: "teleport",
-    });
+    } as unknown as OnboardingState);
 
     expect(saved()).toEqual({
-      step: "categories",
+      step: "introduction",
       privacyGoal: null,
       categories: ["social"],
       startingPoint: null,

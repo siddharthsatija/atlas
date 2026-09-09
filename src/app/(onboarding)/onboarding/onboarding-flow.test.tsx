@@ -30,10 +30,24 @@ vi.mock("./identity-profile-actions", () => ({
   completeIdentityProfileStepAction: vi.fn(),
 }));
 
+/**
+ * A mid-flow state used across resuming and reporting tests.
+ * Positioned at privacy_goal (step 2 of 5) with a saved goal.
+ * categories and startingPoint are legacy fields retained in OnboardingState
+ * for backward-compatible persistence; they carry empty/null values here.
+ */
 const midway: OnboardingState = {
-  step: "categories",
+  step: "privacy_goal",
   privacyGoal: "reduce_exposure",
-  categories: ["social"],
+  categories: [],
+  startingPoint: null,
+};
+
+/** State that positions the user at identity_profile, used to test Back navigation. */
+const atIdentityProfile: OnboardingState = {
+  step: "identity_profile",
+  privacyGoal: "reduce_exposure",
+  categories: [],
   startingPoint: null,
 };
 
@@ -43,19 +57,19 @@ describe("resuming", () => {
   it("opens at the saved step rather than the introduction", async () => {
     render(<OnboardingFlow initialState={midway} />);
 
-    expect(heading("Where do you have accounts?")).toBeInTheDocument();
-    expect(await screen.findByText("Step 3 of 7")).toBeInTheDocument();
+    expect(heading("What brings you here?")).toBeInTheDocument();
+    expect(await screen.findByText("Step 2 of 5")).toBeInTheDocument();
   });
 
   it("restores the choices made before leaving", () => {
     render(<OnboardingFlow initialState={midway} />);
 
-    expect(screen.getByRole("checkbox", { name: /Social/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Reduce my exposure/ })).toBeChecked();
   });
 
   it("keeps an earlier answer reachable by going back", async () => {
     const user = userEvent.setup();
-    render(<OnboardingFlow initialState={midway} />);
+    render(<OnboardingFlow initialState={atIdentityProfile} />);
 
     await user.click(screen.getByRole("button", { name: "Back" }));
 
@@ -79,7 +93,7 @@ describe("reporting progress", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(onStateChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ step: "starting_point", categories: ["social"] }),
+      expect.objectContaining({ step: "identity_profile" }),
     );
   });
 
@@ -91,7 +105,7 @@ describe("reporting progress", () => {
     await user.click(screen.getByRole("button", { name: "Back" }));
 
     expect(onStateChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ step: "privacy_goal" }),
+      expect.objectContaining({ step: "introduction" }),
     );
   });
 
@@ -103,7 +117,7 @@ describe("reporting progress", () => {
     await user.click(screen.getByRole("button", { name: "Skip" }));
 
     expect(onStateChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ step: "starting_point" }),
+      expect.objectContaining({ step: "identity_profile" }),
     );
   });
 
@@ -112,21 +126,24 @@ describe("reporting progress", () => {
     const onStateChange = vi.fn();
     render(<OnboardingFlow initialState={midway} onStateChange={onStateChange} />);
 
-    await user.click(screen.getByRole("checkbox", { name: /Finance/ }));
+    await user.click(screen.getByRole("radio", { name: /Understand my footprint/ }));
 
     expect(onStateChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ categories: ["social", "finance"] }),
+      expect.objectContaining({ privacyGoal: "understand_footprint" }),
     );
   });
 
-  it("reports a deselection, not just additions", async () => {
+  it("reports a changed selection when a different option is chosen", async () => {
     const user = userEvent.setup();
     const onStateChange = vi.fn();
     render(<OnboardingFlow initialState={midway} onStateChange={onStateChange} />);
 
-    await user.click(screen.getByRole("checkbox", { name: /Social/ }));
+    // midway has reduce_exposure selected; clicking another goal changes the value.
+    await user.click(screen.getByRole("radio", { name: /Stay on top of it/ }));
 
-    expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ categories: [] }));
+    expect(onStateChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ privacyGoal: "stay_organised" }),
+    );
   });
 
   it("remains fully operable with no handler supplied", async () => {
@@ -136,7 +153,7 @@ describe("reporting progress", () => {
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    expect(heading("How would you like to begin?")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your identity details" })).toBeInTheDocument();
   });
 });
 
@@ -151,13 +168,13 @@ describe("consent is never resumed", () => {
     const user = userEvent.setup();
     render(
       <OnboardingFlow
-        initialState={{ ...midway, step: "starting_point" }}
+        initialState={midway}
         // A tampered payload carrying consent must not reach the checkbox.
         onStateChange={vi.fn()}
       />,
     );
 
-    // starting_point → identity_profile
+    // privacy_goal → identity_profile
     await user.click(screen.getByRole("button", { name: "Continue" }));
     // identity_profile → ready (where the AI-consent checkbox lives)
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -199,14 +216,18 @@ vi.mock("./adjudication-actions", () => ({
   ),
 }));
 
-import type { CandidateReviewItem, AggregatorEvidenceItem } from "@/features/discovery";
+import type {
+  CandidateReviewItem,
+  AggregatorEvidenceItem,
+  DiscoveryProviderView,
+} from "@/features/discovery";
 import { waitFor } from "@testing-library/react";
 
 const candidateReviewState = {
   step: "candidate_review" as const,
   privacyGoal: "reduce_exposure" as const,
-  categories: ["social"] as string[],
-  startingPoint: "start_fresh" as const,
+  categories: [] as string[],
+  startingPoint: null,
 };
 
 const CANDIDATE: CandidateReviewItem = {
@@ -398,18 +419,164 @@ describe("candidate_review step — auto-advance", () => {
     });
   });
 
-  it("progress shows 7 total steps when a full step count is rendered", async () => {
-    // Verifies step count is 7 after adding candidate_review.
+  it("progress shows 5 total steps when a full step count is rendered", async () => {
+    // Phase 1 graph has 5 steps after removing categories and starting_point.
     render(
       <OnboardingFlow
         initialState={{
-          step: "categories",
+          step: "privacy_goal",
           privacyGoal: "reduce_exposure",
-          categories: ["social"],
+          categories: [],
           startingPoint: null,
         }}
       />,
     );
-    expect(await screen.findByText("Step 3 of 7")).toBeInTheDocument();
+    expect(await screen.findByText("Step 2 of 5")).toBeInTheDocument();
+  });
+});
+
+// ── Phase 1 content contracts (Repair #2) ─────────────────────────────────────
+
+describe("Phase 1 content contracts — removed steps and copy", () => {
+  it("does not render the categories step heading anywhere in the flow", () => {
+    // "Where do you have accounts?" must not appear in any primary-flow step.
+    render(<OnboardingFlow />);
+    expect(screen.queryByText("Where do you have accounts?")).toBeNull();
+  });
+
+  it("does not render the starting_point step heading anywhere in the flow", () => {
+    // "How would you like to begin?" must not appear in any primary-flow step.
+    render(<OnboardingFlow />);
+    expect(screen.queryByText("How would you like to begin?")).toBeNull();
+  });
+
+  it("introduction copy does not claim Atlas cannot find forgotten accounts", () => {
+    render(<OnboardingFlow />);
+    expect(screen.queryByText(/cannot find accounts you have forgotten/i)).toBeNull();
+  });
+
+  it("introduction copy does not claim Atlas works only from what you add", () => {
+    render(<OnboardingFlow />);
+    expect(screen.queryByText(/works only from what you add/i)).toBeNull();
+  });
+
+  it("introduction copy uses bounded-discovery language", () => {
+    render(<OnboardingFlow />);
+    // The limitations item should reference supported providers and authorized signals.
+    expect(screen.getByText(/supported providers/i)).toBeInTheDocument();
+    expect(screen.getByText(/authorize/i)).toBeInTheDocument();
+  });
+
+  it("ready step does not say the dashboard is empty until you add something", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingFlow
+        initialState={{
+          step: "privacy_goal",
+          privacyGoal: null,
+          categories: [],
+          startingPoint: null,
+        }}
+      />,
+    );
+    // Navigate to ready: privacy_goal → identity_profile → ready
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.queryByText(/dashboard is empty until you add something/i)).toBeNull();
+  });
+
+  it("ready step lede covers both discovery-found and zero-result cases", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingFlow
+        initialState={{
+          step: "privacy_goal",
+          privacyGoal: null,
+          categories: [],
+          startingPoint: null,
+        }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    // The new lede references evidence-backed matches without asserting they exist.
+    expect(screen.getByText(/evidence-backed matches/i)).toBeInTheDocument();
+  });
+
+  it("completion form does not emit a legacy categories hidden input", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingFlow
+        initialState={{
+          step: "privacy_goal",
+          privacyGoal: null,
+          categories: ["social", "finance"],
+          startingPoint: null,
+        }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    // Even with legacy categories in state, the form must not re-submit them.
+    // input[type="hidden"] has no ARIA role — no screen.queryBy* method can reach it.
+    // eslint-disable-next-line testing-library/no-node-access
+    expect(document.querySelector('input[name="categories"]')).toBeNull();
+  });
+
+  it("completion form does not emit a legacy startingPoint hidden input", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingFlow
+        initialState={{
+          step: "privacy_goal",
+          privacyGoal: null,
+          categories: [],
+          startingPoint: "own",
+        }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    // Even with a legacy startingPoint in state, the form must not re-submit it.
+    // input[type="hidden"] has no ARIA role — no screen.queryBy* method can reach it.
+    // eslint-disable-next-line testing-library/no-node-access
+    expect(document.querySelector('input[name="startingPoint"]')).toBeNull();
+  });
+
+  it("identity_profile step remains reachable in the primary flow", async () => {
+    const user = userEvent.setup();
+    render(<OnboardingFlow />);
+
+    // introduction → privacy_goal → identity_profile
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.getByRole("heading", { name: "Your identity details" })).toBeInTheDocument();
+  });
+
+  it("DiscoveryConsentSection renders when active providers are supplied", () => {
+    const provider: DiscoveryProviderView = {
+      providerClass: "discovery_github_profile",
+      consentType: "discovery_identifying",
+      disclosureClass: "identifying_lookup",
+      disclosureContractVersion: "v1",
+    };
+    render(
+      <OnboardingFlow initialState={atIdentityProfile} activeDiscoveryProviders={[provider]} />,
+    );
+    // DiscoveryConsentSection should be present alongside IdentityProfileStep.
+    // The section renders when providers.length > 0.
+    expect(screen.getByText(/Allow Atlas to search external sources/i)).toBeInTheDocument();
+  });
+
+  it("upgrade mode starts at identity_profile and hides the progress bar", () => {
+    render(<OnboardingFlow isUpgradeMode={true} />);
+    expect(screen.getByRole("heading", { name: "Your identity details" })).toBeInTheDocument();
+    // Progress bar ("Step N of 5") must not appear in upgrade mode.
+    expect(screen.queryByText(/Step \d+ of 5/)).toBeNull();
   });
 });
